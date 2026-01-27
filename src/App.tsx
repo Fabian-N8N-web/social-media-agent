@@ -36,6 +36,8 @@ interface Post {
   contentType: string;
   platform?: string;
   engagement?: PostEngagement;
+  imageUrl?: string;
+  imageData?: string;
 }
 
 interface ToastData {
@@ -69,6 +71,8 @@ interface PostCardProps {
     likes: number;
     comments: number;
     shares: number;
+    imageUrl?: string;
+    imageData?: string;
   };
 }
 
@@ -99,7 +103,6 @@ interface ToastProps {
   onClose: () => void;
 }
 
-// Extended CSSProperties to allow custom CSS variables
 interface CustomCSSProperties extends CSSProperties {
   '--slider-color'?: string;
 }
@@ -194,14 +197,38 @@ function PostCard({ post }: PostCardProps) {
     <div className="post-card">
       <div className="post-header">
         <div className="post-platforms">
-          {post.platforms.map((platform: string, idx: number) => (<span key={idx} className={`platform-tag ${platform.toLowerCase()}`}>{platform}</span>))}
-          <span className={`status-tag ${post.status}`}>{post.status === 'posted' ? 'Veröffentlicht' : 'Geplant'}</span>
+          {post.platforms.map((platform: string, idx: number) => (
+            <span key={idx} className={`platform-tag ${platform.toLowerCase()}`}>
+              {platform}
+            </span>
+          ))}
+          <span className={`status-tag ${post.status}`}>
+            {post.status === 'posted' ? 'Veröffentlicht' : 'Geplant'}
+          </span>
         </div>
         <span className="post-date">{post.date}</span>
       </div>
-      <div className="post-preview"><div className="post-image">🖼️ Post preview</div></div>
+      <div className="post-preview">
+        {post.imageUrl || post.imageData ? (
+          <img 
+            src={post.imageUrl || `data:image/png;base64,${post.imageData}`} 
+            alt="Post" 
+            className="post-image-actual"
+            onError={(e) => {
+              console.error('Image load error');
+              (e.target as HTMLImageElement).style.display = 'none';
+            }}
+          />
+        ) : (
+          <div className="post-image">🖼️ Post preview</div>
+        )}
+      </div>
       <p className="post-content">{post.content}</p>
-      <div className="post-stats"><span>👍 {post.likes}</span><span>💬 {post.comments}</span><span>🔄 {post.shares}</span></div>
+      <div className="post-stats">
+        <span>👍 {post.likes}</span>
+        <span>💬 {post.comments}</span>
+        <span>🔄 {post.shares}</span>
+      </div>
     </div>
   );
 }
@@ -229,7 +256,20 @@ function Dashboard({ posts, botStatus, onToggleBot, onTriggerPost }: DashboardPr
         <div className="section-header"><h2>Aktuelle Posts</h2><button className="link-button">Alle anzeigen</button></div>
         <div className="posts-grid">
           {posts.slice(0, 4).map((post: Post, idx: number) => (
-            <PostCard key={idx} post={{ platforms: ['Facebook', 'Instagram'], status: post.status, date: new Date(post.timestamp).toLocaleString('de-DE'), content: post.content, likes: post.engagement?.likes || 0, comments: post.engagement?.comments || 0, shares: post.engagement?.shares || 0 }} />
+            <PostCard 
+              key={idx} 
+              post={{
+                platforms: [post.platform || 'Facebook'],
+                status: post.status,
+                date: new Date(post.timestamp).toLocaleString('de-DE'),
+                content: post.content,
+                likes: post.engagement?.likes || 0,
+                comments: post.engagement?.comments || 0,
+                shares: post.engagement?.shares || 0,
+                imageUrl: post.imageUrl,
+                imageData: post.imageData
+              }} 
+            />
           ))}
         </div>
       </div>
@@ -407,16 +447,48 @@ export default function App() {
     setIsLoading(true);
     try {
       const response = await fetch(WEBHOOK_URL, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'post', config: { platforms: { facebook: true, instagram: true }, tonality: config.tonality, topic: config.topic, targetAudience: config.targetAudience, language: config.language, hashtags: config.hashtags, emojiUsage: config.emojiUsage } })
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'post',
+          config: {
+            platforms: { facebook: true, instagram: true },
+            tonality: config.tonality,
+            topic: config.topic,
+            targetAudience: config.targetAudience,
+            language: config.language,
+            hashtags: config.hashtags,
+            emojiUsage: config.emojiUsage
+          }
+        })
       });
+
       const data = await response.json();
+      console.log('Webhook Response:', data);
+
       if (data.success) {
-        const platformNames = data.posts?.map((p: Post) => p.platform).join(' & ') || 'Facebook & Instagram';
+        const newPosts = data.posts?.map((p: any) => ({
+          content: p.content || p.text || '',
+          timestamp: new Date().toISOString(),
+          status: 'posted',
+          contentType: 'post',
+          platform: p.platform,
+          engagement: { likes: 0, comments: 0, shares: 0 },
+          imageUrl: p.imageUrl,
+          imageData: p.image || p.imageData
+        })) || [];
+
+        setPosts((prev: Post[]) => [...newPosts, ...prev]);
+        
+        const platformNames = data.posts?.map((p: any) => p.platform).join(' & ') || 'Facebook & Instagram';
         showToast(`✅ Post erfolgreich auf ${platformNames} veröffentlicht!`, 'success');
-        if (data.posts) setPosts((prev: Post[]) => [...data.posts, ...prev]);
-      } else { showToast('Fehler beim Posten', 'error'); }
-    } catch (error) { console.error('Error:', error); showToast('Verbindungsfehler zum Bot', 'error'); }
+      } else {
+        showToast('Fehler beim Posten', 'error');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      showToast('Verbindungsfehler zum Bot', 'error');
+    }
     setIsLoading(false);
   };
 
