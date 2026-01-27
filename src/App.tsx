@@ -37,7 +37,6 @@ interface Post {
   platform?: string;
   engagement?: PostEngagement;
   imageUrl?: string;
-  imageData?: string;
 }
 
 interface ToastData {
@@ -72,7 +71,6 @@ interface PostCardProps {
     comments: number;
     shares: number;
     imageUrl?: string;
-    imageData?: string;
   };
 }
 
@@ -209,18 +207,23 @@ function PostCard({ post }: PostCardProps) {
         <span className="post-date">{post.date}</span>
       </div>
       <div className="post-preview">
-        {post.imageUrl || post.imageData ? (
+        {post.imageUrl ? (
           <img 
-            src={post.imageUrl || `data:image/png;base64,${post.imageData}`} 
-            alt="Post" 
+            src={post.imageUrl} 
+            alt="Generated Post" 
             className="post-image-actual"
             onError={(e) => {
-              console.error('Image load error');
-              (e.target as HTMLImageElement).style.display = 'none';
+              console.error('Image load error for URL:', post.imageUrl);
+              const target = e.target as HTMLImageElement;
+              target.style.display = 'none';
+              const placeholder = document.createElement('div');
+              placeholder.className = 'post-image';
+              placeholder.textContent = '🖼️ Bild konnte nicht geladen werden';
+              target.parentElement?.appendChild(placeholder);
             }}
           />
         ) : (
-          <div className="post-image">🖼️ Post preview</div>
+          <div className="post-image">🖼️ Kein Bild vorhanden</div>
         )}
       </div>
       <p className="post-content">{post.content}</p>
@@ -266,8 +269,7 @@ function Dashboard({ posts, botStatus, onToggleBot, onTriggerPost }: DashboardPr
                 likes: post.engagement?.likes || 0,
                 comments: post.engagement?.comments || 0,
                 shares: post.engagement?.shares || 0,
-                imageUrl: post.imageUrl,
-                imageData: post.imageData
+                imageUrl: post.imageUrl
               }} 
             />
           ))}
@@ -464,19 +466,38 @@ export default function App() {
       });
 
       const data = await response.json();
-      console.log('Webhook Response:', data);
+      console.log('Full Webhook Response:', JSON.stringify(data, null, 2));
 
       if (data.success) {
-        const newPosts = data.posts?.map((p: any) => ({
-          content: p.content || p.text || '',
-          timestamp: new Date().toISOString(),
-          status: 'posted',
-          contentType: 'post',
-          platform: p.platform,
-          engagement: { likes: 0, comments: 0, shares: 0 },
-          imageUrl: p.imageUrl,
-          imageData: p.image || p.imageData
-        })) || [];
+        const newPosts = data.posts?.map((p: any) => {
+          console.log('Post data:', p);
+          console.log('Image field:', p.image);
+          console.log('ImageData field:', p.imageData);
+          console.log('ImageUrl field:', p.imageUrl);
+          
+          // Extrahiere Bild-URL oder Base64
+          let imageSource = null;
+          if (p.imageUrl && p.imageUrl.startsWith('http')) {
+            imageSource = p.imageUrl;
+          } else if (p.image) {
+            // Prüfe ob bereits data:image Prefix vorhanden
+            imageSource = p.image.startsWith('data:image') ? p.image : `data:image/png;base64,${p.image}`;
+          } else if (p.imageData) {
+            imageSource = p.imageData.startsWith('data:image') ? p.imageData : `data:image/png;base64,${p.imageData}`;
+          }
+          
+          console.log('Final image source:', imageSource?.substring(0, 100));
+
+          return {
+            content: p.content || p.text || '',
+            timestamp: new Date().toISOString(),
+            status: 'posted',
+            contentType: 'post',
+            platform: p.platform,
+            engagement: { likes: 0, comments: 0, shares: 0 },
+            imageUrl: imageSource
+          };
+        }) || [];
 
         setPosts((prev: Post[]) => [...newPosts, ...prev]);
         
