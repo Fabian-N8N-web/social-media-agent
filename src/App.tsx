@@ -85,6 +85,7 @@ interface DashboardProps {
 interface SettingsProps {
   config: Config;
   setConfig: React.Dispatch<React.SetStateAction<Config>>;
+  onSave: () => void;
 }
 
 interface AnalyticsProps {
@@ -279,7 +280,7 @@ function Dashboard({ posts, botStatus, onToggleBot, onTriggerPost }: DashboardPr
   );
 }
 
-function Settings({ config, setConfig }: SettingsProps) {
+function Settings({ config, setConfig, onSave }: SettingsProps) {
   const handleChange = (key: string, value: unknown) => setConfig((prev: Config) => ({ ...prev, [key]: value }));
   const handleContentMixChange = (type: string, value: string) => setConfig((prev: Config) => ({ ...prev, contentMix: { ...prev.contentMix, [type]: parseInt(value) } }));
 
@@ -364,26 +365,7 @@ function Settings({ config, setConfig }: SettingsProps) {
           </select>
         </div>
       </div>
-      <div className="settings-actions"><button className="save-button">💾 Einstellungen speichern</button></div>
-    </div>
-  );
-}
-
-function Analytics({ posts }: AnalyticsProps) {
-  const totalLikes = posts.reduce((acc: number, p: Post) => acc + (p.engagement?.likes || 0), 0);
-  const totalComments = posts.reduce((acc: number, p: Post) => acc + (p.engagement?.comments || 0), 0);
-  const totalShares = posts.reduce((acc: number, p: Post) => acc + (p.engagement?.shares || 0), 0);
-
-  return (
-    <div className="analytics">
-      <h1>Analytics</h1><p className="subtitle">Übersicht deiner Performance</p>
-      <div className="analytics-stats">
-        <div className="analytics-card"><span className="analytics-icon">👍</span><span className="analytics-value">{totalLikes}</span><span className="analytics-label">Likes gesamt</span></div>
-        <div className="analytics-card"><span className="analytics-icon">💬</span><span className="analytics-value">{totalComments}</span><span className="analytics-label">Kommentare</span></div>
-        <div className="analytics-card"><span className="analytics-icon">🔄</span><span className="analytics-value">{totalShares}</span><span className="analytics-label">Shares</span></div>
-        <div className="analytics-card"><span className="analytics-icon">📊</span><span className="analytics-value">{posts.length}</span><span className="analytics-label">Posts gesamt</span></div>
-      </div>
-      <div className="analytics-chart"><h3>Engagement-Verlauf</h3><div className="chart-placeholder"><p>📈 Chart wird hier angezeigt</p><p className="chart-info">Engagement der letzten 7 Tage</p></div></div>
+      <div className="settings-actions"><button onClick={onSave} className="save-button">💾 Einstellungen speichern</button></div>
     </div>
   );
 }
@@ -432,6 +414,155 @@ export default function App() {
 
   const [config, setConfig] = useState<Config>({
     tonality: 'professional', topic: 'Business & Erfolg', targetAudience: 'b2b', ageRange: { min: 25, max: 55 },
+    postFrequency: 3, publishWindow: { start: '09:00', end: '18:00' },
+    contentMix: { tips: 30, quotes: 25, products: 25, news: 20 },
+    hashtags: ['#business', '#success', '#motivation', '#entrepreneur'],
+    emojiUsage: 'moderate', language: 'de', aiModel: 'gpt-4'
+  });
+
+  // LocalStorage Funktionen
+  const saveToLocalStorage = () => {
+    const data = {
+      posts,
+      config,
+      botStatus,
+      timestamp: new Date().toISOString()
+    };
+    localStorage.setItem('socialbot_data', JSON.stringify(data));
+    console.log('Daten gespeichert:', data);
+  };
+
+  const loadFromLocalStorage = () => {
+    const saved = localStorage.getItem('socialbot_data');
+    if (saved) {
+      try {
+        const data = JSON.parse(saved);
+        if (data.posts) setPosts(data.posts);
+        if (data.config) setConfig(data.config);
+        if (data.botStatus !== undefined) setBotStatus(data.botStatus);
+        console.log('Daten geladen:', data);
+        showToast('Daten erfolgreich geladen', 'success');
+      } catch (error) {
+        console.error('Fehler beim Laden:', error);
+      }
+    }
+  };
+
+  // Beim Start laden
+  useEffect(() => {
+    const savedUser = localStorage.getItem('socialbot_user');
+    if (savedUser) {
+      setUser(savedUser);
+      setIsLoggedIn(true);
+      loadFromLocalStorage();
+    }
+  }, []);
+
+  // Auto-Save bei Änderungen
+  useEffect(() => {
+    if (isLoggedIn && posts.length > 0) {
+      saveToLocalStorage();
+    }
+  }, [posts]);
+
+  useEffect(() => {
+    if (isLoggedIn) {
+      saveToLocalStorage();
+    }
+  }, [config, botStatus]);
+
+  const handleLogin = (username: string) => { setUser(username); setIsLoggedIn(true); showToast('Erfolgreich angemeldet!', 'success'); };
+  const handleLogout = () => { localStorage.removeItem('socialbot_user'); setUser(null); setIsLoggedIn(false); showToast('Erfolgreich abgemeldet', 'info'); };
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => setToast({ message, type });
+  const toggleBot = () => { setBotStatus(!botStatus); showToast(botStatus ? 'Bot wurde pausiert' : 'Bot wurde gestartet', 'success'); };
+
+  const triggerPost = async () => {
+    setIsLoading(true);
+    try {
+      const response = await fetch(WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'post',
+          config: {
+            platforms: { facebook: true, instagram: true },
+            tonality: config.tonality,
+            topic: config.topic,
+            targetAudience: config.targetAudience,
+            language: config.language,
+            hashtags: config.hashtags,
+            emojiUsage: config.emojiUsage
+          }
+        })
+      });
+
+      const data = await response.json();
+      console.log('Full Webhook Response:', JSON.stringify(data, null, 2));
+
+      if (data.success) {
+        const newPosts = data.posts?.map((p: any) => {
+          console.log('Post data:', p);
+          console.log('Image field:', p.image);
+          console.log('ImageData field:', p.imageData);
+          console.log('ImageUrl field:', p.imageUrl);
+          
+          let imageSource = null;
+          if (p.imageUrl && p.imageUrl.startsWith('http')) {
+            imageSource = p.imageUrl;
+          } else if (p.image) {
+            imageSource = p.image.startsWith('data:image') ? p.image : `data:image/png;base64,${p.image}`;
+          } else if (p.imageData) {
+            imageSource = p.imageData.startsWith('data:image') ? p.imageData : `data:image/png;base64,${p.imageData}`;
+          }
+          
+          console.log('Final image source:', imageSource?.substring(0, 100));
+
+          return {
+            content: p.content || p.text || '',
+            timestamp: new Date().toISOString(),
+            status: 'posted',
+            contentType: 'post',
+            platform: p.platform,
+            engagement: { likes: 0, comments: 0, shares: 0 },
+            imageUrl: imageSource
+          };
+        }) || [];
+
+        setPosts((prev: Post[]) => [...newPosts, ...prev]);
+        
+        const platformNames = data.posts?.map((p: any) => p.platform).join(' & ') || 'Facebook & Instagram';
+        showToast(`✅ Post erfolgreich auf ${platformNames} veröffentlicht!`, 'success');
+      } else {
+        showToast('Fehler beim Posten', 'error');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      showToast('Verbindungsfehler zum Bot', 'error');
+    }
+    setIsLoading(false);
+  };
+
+  const handleSaveSettings = () => {
+    saveToLocalStorage();
+    showToast('Einstellungen erfolgreich gespeichert!', 'success');
+  };
+
+  if (!isLoggedIn) return <LoginScreen onLogin={handleLogin} />;
+
+  return (
+    <div className="app">
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} onLogout={handleLogout} />
+      <main className="main-content">
+        {activeTab === 'dashboard' && <Dashboard config={config} posts={posts} botStatus={botStatus} onToggleBot={toggleBot} onTriggerPost={triggerPost} />}
+        {activeTab === 'settings' && <Settings config={config} setConfig={setConfig} onSave={handleSaveSettings} />}
+        {activeTab === 'analytics' && <Analytics posts={posts} />}
+        {activeTab === 'content' && <ContentPlanning posts={posts} />}
+      </main>
+      {isLoading && <div className="loading-overlay"><div className="spinner"></div><p>Wird gepostet...</p></div>}
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+    </div>
+  );
+},
     postFrequency: 3, publishWindow: { start: '09:00', end: '18:00' },
     contentMix: { tips: 30, quotes: 25, products: 25, news: 20 },
     hashtags: ['#business', '#success', '#motivation', '#entrepreneur'],
