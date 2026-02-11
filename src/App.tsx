@@ -1,5 +1,6 @@
 import { useState, useEffect, CSSProperties } from 'react';
 import './App.css';
+import { supabase, SupabaseService } from './supabaseClient';
 
 const WEBHOOK_URL = 'https://n8n.srv1274405.hstgr.cloud/webhook/social-bot-trigger';
 
@@ -135,58 +136,69 @@ function LoginScreen({ onLogin }: LoginScreenProps) {
           <h1>Social Bot</h1>
           <p>Melde dich an, um fortzufahren</p>
         </div>
-        <form onSubmit={handleSubmit} className="login-form">
-          <div className="form-group">
+        <form onSubmit={handleSubmit}>
+          <div className="input-group">
             <label>Benutzername</label>
-            <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Benutzername eingeben" required />
+            <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="admin oder user" required />
           </div>
-          <div className="form-group">
+          <div className="input-group">
             <label>Passwort</label>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Passwort eingeben" required />
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required />
           </div>
           {error && <div className="error-message">{error}</div>}
-          <button type="submit" disabled={isLoading} className="login-button">{isLoading ? 'Anmelden...' : 'Anmelden'}</button>
+          <button type="submit" className="login-button" disabled={isLoading}>
+            {isLoading ? 'Anmeldung läuft...' : 'Anmelden'}
+          </button>
         </form>
+        <div className="login-footer">
+          <p>Demo-Zugänge: admin/admin123 oder user/user123</p>
+        </div>
       </div>
     </div>
   );
 }
 
 function Sidebar({ activeTab, setActiveTab, onLogout }: SidebarProps) {
-  const menuItems = [
+  const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: '📊' },
     { id: 'settings', label: 'Einstellungen', icon: '⚙️' },
     { id: 'analytics', label: 'Analytics', icon: '📈' },
-    { id: 'content', label: 'Content-Planung', icon: '📝' }
+    { id: 'planning', label: 'Content-Planung', icon: '📅' }
   ];
 
   return (
     <div className="sidebar">
-      <div className="sidebar-logo">
-        <div className="logo-icon">SM</div>
-        <span className="logo-text">Social Bot</span>
+      <div className="sidebar-header">
+        <div className="logo">
+          <span className="logo-icon">SM</span>
+          <span className="logo-text">Social Bot</span>
+        </div>
       </div>
       <nav className="sidebar-nav">
-        {menuItems.map((item) => (
-          <button key={item.id} onClick={() => setActiveTab(item.id)} className={`nav-item ${activeTab === item.id ? 'active' : ''}`}>
+        {navItems.map(item => (
+          <button key={item.id} className={`nav-item ${activeTab === item.id ? 'active' : ''}`} onClick={() => setActiveTab(item.id)}>
             <span className="nav-icon">{item.icon}</span>
             <span className="nav-label">{item.label}</span>
           </button>
         ))}
       </nav>
-      <button onClick={onLogout} className="logout-button"><span>🚪</span><span>Abmelden</span></button>
+      <div className="sidebar-footer">
+        <button className="logout-button" onClick={onLogout}>
+          <span>🚪</span> Abmelden
+        </button>
+      </div>
     </div>
   );
 }
 
 function StatCard({ title, value, icon, color }: StatCardProps) {
   return (
-    <div className="stat-card">
+    <div className="stat-card" style={{ borderLeft: `4px solid ${color}` }}>
+      <div className="stat-icon" style={{ background: `${color}20` }}>{icon}</div>
       <div className="stat-content">
-        <span className="stat-title">{title}</span>
-        <span className="stat-value">{value}</span>
+        <div className="stat-value">{value}</div>
+        <div className="stat-title">{title}</div>
       </div>
-      <div className={`stat-icon ${color}`}><span>{icon}</span></div>
     </div>
   );
 }
@@ -196,84 +208,77 @@ function PostCard({ post }: PostCardProps) {
     <div className="post-card">
       <div className="post-header">
         <div className="post-platforms">
-          {post.platforms.map((platform: string, idx: number) => (
-            <span key={idx} className={`platform-tag ${platform.toLowerCase()}`}>
-              {platform}
-            </span>
+          {post.platforms.map(platform => (
+            <span key={platform} className={`platform-tag ${platform.toLowerCase()}`}>{platform}</span>
           ))}
-          <span className={`status-tag ${post.status}`}>
-            {post.status === 'posted' ? 'Veröffentlicht' : 'Geplant'}
-          </span>
         </div>
-        <span className="post-date">{post.date}</span>
+        <span className={`status-badge ${post.status}`}>{post.status === 'posted' ? '✓ Gepostet' : '⏱ Geplant'}</span>
       </div>
-      <div className="post-preview">
-        {post.imageUrl ? (
-          <img 
-            src={post.imageUrl} 
-            alt="Generated Post" 
-            className="post-image-actual"
-            onError={(e) => {
-              console.error('Image load error for URL:', post.imageUrl);
-              const target = e.target as HTMLImageElement;
-              target.style.display = 'none';
-              const placeholder = document.createElement('div');
-              placeholder.className = 'post-image';
-              placeholder.textContent = '🖼️ Bild konnte nicht geladen werden';
-              target.parentElement?.appendChild(placeholder);
-            }}
-          />
-        ) : (
-          <div className="post-image">🖼️ Kein Bild vorhanden</div>
-        )}
-      </div>
-      <p className="post-content">{post.content}</p>
-      <div className="post-stats">
-        <span>👍 {post.likes}</span>
-        <span>💬 {post.comments}</span>
-        <span>🔄 {post.shares}</span>
+      {post.imageUrl && <img src={post.imageUrl} alt="Post" className="post-image" />}
+      <div className="post-content">{post.content}</div>
+      <div className="post-footer">
+        <div className="post-date">{new Date(post.date).toLocaleString('de-DE')}</div>
+        <div className="post-engagement">
+          <span>❤️ {post.likes}</span>
+          <span>💬 {post.comments}</span>
+          <span>🔄 {post.shares}</span>
+        </div>
       </div>
     </div>
   );
 }
 
-function Dashboard({ posts, botStatus, onToggleBot, onTriggerPost }: DashboardProps) {
-  const todayPosts = posts.filter((p: Post) => new Date(p.timestamp).toDateString() === new Date().toDateString()).length;
-  const totalEngagement = posts.reduce((acc: number, p: Post) => acc + (p.engagement?.likes || 0) + (p.engagement?.comments || 0) + (p.engagement?.shares || 0), 0);
-  const avgEngagement = posts.length > 0 ? Math.round((totalEngagement / posts.length / 3) * 100) : 0;
+function Dashboard({ config, posts, botStatus, onToggleBot, onTriggerPost }: DashboardProps) {
+  const totalPosts = posts.length;
+  const totalEngagement = posts.reduce((sum, p) => sum + (p.engagement?.likes || 0) + (p.engagement?.comments || 0) + (p.engagement?.shares || 0), 0);
+  const avgEngagement = totalPosts > 0 ? Math.round(totalEngagement / totalPosts) : 0;
+
+  const recentPosts = posts.slice(0, 5).map(p => ({
+    platforms: [p.platform || 'Facebook'],
+    status: p.status,
+    date: p.timestamp,
+    content: p.content,
+    likes: p.engagement?.likes || 0,
+    comments: p.engagement?.comments || 0,
+    shares: p.engagement?.shares || 0,
+    imageUrl: p.imageUrl
+  }));
 
   return (
     <div className="dashboard">
       <div className="dashboard-header">
-        <div><h1>Social Media Bot Dashboard</h1><p>Verwalte deine automatisierten Social Media Posts</p></div>
-        <button onClick={onToggleBot} className={`bot-toggle-button ${botStatus ? 'active' : 'inactive'}`}>{botStatus ? '⏸️ Bot Pausieren' : '▶️ Bot Starten'}</button>
+        <h1>Dashboard</h1>
+        <div className="header-actions">
+          <button className="action-button primary" onClick={onTriggerPost}>
+            <span>🚀</span> Post jetzt erstellen
+          </button>
+        </div>
       </div>
+
       <div className="stats-grid">
-        <StatCard title="Bot Status" value={botStatus ? 'Aktiv' : 'Pausiert'} icon="🤖" color="blue" />
-        <StatCard title="Posts heute" value={todayPosts} icon="📤" color="orange" />
-        <StatCard title="Posts gesamt" value={posts.length} icon="📊" color="purple" />
-        <StatCard title="Engagement" value={`${avgEngagement}%`} icon="📈" color="green" />
-        <StatCard title="Reichweite" value="2.4K" icon="👥" color="pink" />
+        <StatCard title="Gesamt Posts" value={totalPosts} icon="📝" color="#3b82f6" />
+        <StatCard title="Ø Engagement" value={avgEngagement} icon="❤️" color="#ec4899" />
+        <StatCard title="Bot Status" value={botStatus ? 'Aktiv' : 'Inaktiv'} icon="🤖" color={botStatus ? '#10b981' : '#6b7280'} />
+        <StatCard title="Frequenz" value={`${config.postFrequency}x/Woche`} icon="⏰" color="#f59e0b" />
       </div>
-      <div className="quick-actions"><h3>Schnellaktionen</h3><button onClick={onTriggerPost} className="action-button primary">📤 Jetzt posten</button></div>
-      <div className="posts-section">
-        <div className="section-header"><h2>Aktuelle Posts</h2><button className="link-button">Alle anzeigen</button></div>
+
+      <div className="bot-control-panel">
+        <div className="bot-status-header">
+          <h2>Bot Steuerung</h2>
+          <div className={`bot-toggle-button ${botStatus ? 'active' : ''}`} onClick={onToggleBot}>
+            <div className="toggle-slider"></div>
+            <span className="toggle-label">{botStatus ? 'AN' : 'AUS'}</span>
+          </div>
+        </div>
+        <div className="bot-info">
+          <p>Der Bot erstellt automatisch {config.postFrequency}x pro Woche Posts zwischen {config.publishWindow.start} und {config.publishWindow.end} Uhr.</p>
+        </div>
+      </div>
+
+      <div className="recent-posts">
+        <h2>Letzte Posts</h2>
         <div className="posts-grid">
-          {posts.slice(0, 4).map((post: Post, idx: number) => (
-            <PostCard 
-              key={idx} 
-              post={{
-                platforms: [post.platform || 'Facebook'],
-                status: post.status,
-                date: new Date(post.timestamp).toLocaleString('de-DE'),
-                content: post.content,
-                likes: post.engagement?.likes || 0,
-                comments: post.engagement?.comments || 0,
-                shares: post.engagement?.shares || 0,
-                imageUrl: post.imageUrl
-              }} 
-            />
-          ))}
+          {recentPosts.length > 0 ? recentPosts.map((post, idx) => <PostCard key={idx} post={post} />) : <p className="no-posts">Noch keine Posts vorhanden. Erstelle deinen ersten Post!</p>}
         </div>
       </div>
     </div>
@@ -281,126 +286,179 @@ function Dashboard({ posts, botStatus, onToggleBot, onTriggerPost }: DashboardPr
 }
 
 function Settings({ config, setConfig, onSave }: SettingsProps) {
-  const handleChange = (key: string, value: unknown) => setConfig((prev: Config) => ({ ...prev, [key]: value }));
-  const handleContentMixChange = (type: string, value: string) => setConfig((prev: Config) => ({ ...prev, contentMix: { ...prev.contentMix, [type]: parseInt(value) } }));
+  const [localConfig, setLocalConfig] = useState(config);
+
+  useEffect(() => {
+    setLocalConfig(config);
+  }, [config]);
+
+  const handleSave = () => {
+    setConfig(localConfig);
+    onSave();
+  };
+
+  const tonalities = ['professional', 'casual', 'humorous', 'inspirational'];
 
   return (
     <div className="settings">
-      <h1>Einstellungen</h1>
-      <p className="subtitle">Konfiguriere deinen Social Media Bot</p>
+      <div className="settings-header">
+        <h1>Einstellungen</h1>
+        <button className="action-button primary" onClick={handleSave}>
+          <span>💾</span> Speichern
+        </button>
+      </div>
+
       <div className="settings-grid">
-        <div className="settings-card">
-          <h3>🎭 Tonalität</h3><p>Wähle den Stil deiner Posts</p>
-          <div className="button-group">
-            {['professional', 'casual', 'humorous', 'inspiring'].map(tone => (
-              <button key={tone} onClick={() => handleChange('tonality', tone)} className={`tone-button ${config.tonality === tone ? 'active' : ''}`}>
-                {tone === 'professional' && '👔 Professionell'}{tone === 'casual' && '😊 Casual'}{tone === 'humorous' && '😄 Humorvoll'}{tone === 'inspiring' && '✨ Inspirierend'}
-              </button>
-            ))}
+        <div className="settings-section">
+          <h2>Content Einstellungen</h2>
+          <div className="setting-group">
+            <label>Tonalität</label>
+            <div className="tone-buttons">
+              {tonalities.map(tone => (
+                <button key={tone} className={`tone-button ${localConfig.tonality === tone ? 'active' : ''}`} onClick={() => setLocalConfig({ ...localConfig, tonality: tone })}>
+                  {tone}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-        <div className="settings-card">
-          <h3>📌 Thema</h3><p>Hauptthema deiner Inhalte</p>
-          <input type="text" value={config.topic} onChange={(e) => handleChange('topic', e.target.value)} placeholder="z.B. Business, Lifestyle, Tech..." className="text-input" />
-        </div>
-        <div className="settings-card">
-          <h3>🎯 Zielgruppe</h3><p>Definiere deine Zielgruppe</p>
-          <select value={config.targetAudience} onChange={(e) => handleChange('targetAudience', e.target.value)} className="select-input">
-            <option value="b2b">B2B - Geschäftskunden</option><option value="b2c">B2C - Endverbraucher</option><option value="both">Beide</option>
-          </select>
-          <div className="age-group">
-            <label>Altersgruppe</label>
+
+          <div className="setting-group">
+            <label>Thema</label>
+            <input type="text" value={localConfig.topic} onChange={(e) => setLocalConfig({ ...localConfig, topic: e.target.value })} />
+          </div>
+
+          <div className="setting-group">
+            <label>Zielgruppe</label>
+            <select value={localConfig.targetAudience} onChange={(e) => setLocalConfig({ ...localConfig, targetAudience: e.target.value })}>
+              <option value="b2b">B2B</option>
+              <option value="b2c">B2C</option>
+              <option value="mixed">Gemischt</option>
+            </select>
+          </div>
+
+          <div className="setting-group">
+            <label>Altersgruppe: {localConfig.ageRange.min} - {localConfig.ageRange.max} Jahre</label>
             <div className="range-inputs">
-              <input type="number" value={config.ageRange?.min || 18} onChange={(e) => handleChange('ageRange', { ...config.ageRange, min: parseInt(e.target.value) })} min={13} max={65} className="number-input" />
-              <span>bis</span>
-              <input type="number" value={config.ageRange?.max || 65} onChange={(e) => handleChange('ageRange', { ...config.ageRange, max: parseInt(e.target.value) })} min={13} max={100} className="number-input" />
+              <input type="range" min="18" max="65" value={localConfig.ageRange.min} onChange={(e) => setLocalConfig({ ...localConfig, ageRange: { ...localConfig.ageRange, min: parseInt(e.target.value) } })} />
+              <input type="range" min="18" max="65" value={localConfig.ageRange.max} onChange={(e) => setLocalConfig({ ...localConfig, ageRange: { ...localConfig.ageRange, max: parseInt(e.target.value) } })} />
             </div>
           </div>
         </div>
-        <div className="settings-card">
-          <h3>📅 Post-Frequenz</h3><p>Wie oft soll gepostet werden?</p>
-          <div className="frequency-control">
-            <input type="range" min={1} max={10} value={config.postFrequency} onChange={(e) => handleChange('postFrequency', parseInt(e.target.value))} className="range-slider" />
-            <span className="frequency-value">{config.postFrequency} Posts/Tag</span>
+
+        <div className="settings-section">
+          <h2>Posting Zeitplan</h2>
+          <div className="setting-group">
+            <label>Posts pro Woche: {localConfig.postFrequency}</label>
+            <input type="range" min="1" max="14" value={localConfig.postFrequency} onChange={(e) => setLocalConfig({ ...localConfig, postFrequency: parseInt(e.target.value) })} style={{ '--slider-color': '#3b82f6' } as CustomCSSProperties} />
           </div>
-        </div>
-        <div className="settings-card">
-          <h3>⏰ Zeitfenster</h3><p>Wann sollen Posts veröffentlicht werden?</p>
-          <div className="time-inputs">
-            <div className="time-group"><label>Von</label><input type="time" value={config.publishWindow?.start || '09:00'} onChange={(e) => handleChange('publishWindow', { ...config.publishWindow, start: e.target.value })} className="time-input" /></div>
-            <div className="time-group"><label>Bis</label><input type="time" value={config.publishWindow?.end || '18:00'} onChange={(e) => handleChange('publishWindow', { ...config.publishWindow, end: e.target.value })} className="time-input" /></div>
+
+          <div className="setting-group">
+            <label>Posting Zeitfenster</label>
+            <div className="time-inputs">
+              <input type="time" value={localConfig.publishWindow.start} onChange={(e) => setLocalConfig({ ...localConfig, publishWindow: { ...localConfig.publishWindow, start: e.target.value } })} />
+              <span>bis</span>
+              <input type="time" value={localConfig.publishWindow.end} onChange={(e) => setLocalConfig({ ...localConfig, publishWindow: { ...localConfig.publishWindow, end: e.target.value } })} />
+            </div>
           </div>
-        </div>
-        <div className="settings-card full-width">
-          <h3>📊 Content-Mix</h3><p>Verteilung der Content-Typen</p>
-          <div className="content-mix-sliders">
-            {[{ key: 'tips', label: '💡 Tipps', color: '#3b82f6' }, { key: 'quotes', label: '💬 Zitate', color: '#8b5cf6' }, { key: 'products', label: '🛍️ Produkte', color: '#f59e0b' }, { key: 'news', label: '📰 News', color: '#10b981' }].map(item => (
-              <div key={item.key} className="mix-slider">
-                <div className="mix-label"><span>{item.label}</span><span>{config.contentMix?.[item.key] || 25}%</span></div>
-                <input type="range" min={0} max={100} value={config.contentMix?.[item.key] || 25} onChange={(e) => handleContentMixChange(item.key, e.target.value)} className="range-slider" style={{ '--slider-color': item.color } as CustomCSSProperties} />
+
+          <div className="setting-group">
+            <label>Content Mix</label>
+            {Object.entries(localConfig.contentMix).map(([key, value]) => (
+              <div key={key} className="slider-group">
+                <span>{key}: {value}%</span>
+                <input type="range" min="0" max="100" value={value} onChange={(e) => setLocalConfig({ ...localConfig, contentMix: { ...localConfig.contentMix, [key]: parseInt(e.target.value) } })} />
               </div>
             ))}
           </div>
         </div>
-        <div className="settings-card">
-          <h3>#️⃣ Hashtags</h3><p>Standard-Hashtags für Posts</p>
-          <textarea value={config.hashtags?.join(' ') || ''} onChange={(e) => handleChange('hashtags', e.target.value.split(' ').filter(h => h))} placeholder="#business #success #motivation" className="textarea-input" />
-        </div>
-        <div className="settings-card">
-          <h3>😀 Emoji-Einstellungen</h3><p>Emoji-Nutzung in Posts</p>
-          <select value={config.emojiUsage} onChange={(e) => handleChange('emojiUsage', e.target.value)} className="select-input">
-            <option value="none">Keine Emojis</option><option value="minimal">Minimal (1-2)</option><option value="moderate">Moderat (3-5)</option><option value="heavy">Viele Emojis</option>
-          </select>
-        </div>
-        <div className="settings-card">
-          <h3>🌐 Sprache</h3><p>Sprache der generierten Inhalte</p>
-          <select value={config.language} onChange={(e) => handleChange('language', e.target.value)} className="select-input">
-            <option value="de">🇩🇪 Deutsch</option><option value="en">🇬🇧 English</option>
-          </select>
-        </div>
-        <div className="settings-card">
-          <h3>🤖 KI-Modell</h3><p>Wähle das KI-Modell für Content</p>
-          <select value={config.aiModel} onChange={(e) => handleChange('aiModel', e.target.value)} className="select-input">
-            <option value="gpt-4">GPT-4 (Beste Qualität)</option><option value="gpt-3.5">GPT-3.5 (Schneller)</option><option value="claude">Claude (Kreativ)</option>
-          </select>
+
+        <div className="settings-section">
+          <h2>Weitere Optionen</h2>
+          <div className="setting-group">
+            <label>Hashtags (kommagetrennt)</label>
+            <input type="text" value={localConfig.hashtags.join(', ')} onChange={(e) => setLocalConfig({ ...localConfig, hashtags: e.target.value.split(',').map(h => h.trim()) })} />
+          </div>
+
+          <div className="setting-group">
+            <label>Emoji Nutzung</label>
+            <select value={localConfig.emojiUsage} onChange={(e) => setLocalConfig({ ...localConfig, emojiUsage: e.target.value })}>
+              <option value="none">Keine</option>
+              <option value="minimal">Minimal</option>
+              <option value="moderate">Moderat</option>
+              <option value="extensive">Umfangreich</option>
+            </select>
+          </div>
+
+          <div className="setting-group">
+            <label>Sprache</label>
+            <select value={localConfig.language} onChange={(e) => setLocalConfig({ ...localConfig, language: e.target.value })}>
+              <option value="de">Deutsch</option>
+              <option value="en">Englisch</option>
+            </select>
+          </div>
+
+          <div className="setting-group">
+            <label>AI Model</label>
+            <select value={localConfig.aiModel} onChange={(e) => setLocalConfig({ ...localConfig, aiModel: e.target.value })}>
+              <option value="gpt-4">GPT-4</option>
+              <option value="gpt-3.5">GPT-3.5</option>
+            </select>
+          </div>
         </div>
       </div>
-      <div className="settings-actions"><button onClick={onSave} className="save-button">💾 Einstellungen speichern</button></div>
+    </div>
+  );
+}
+
+function Analytics({ posts }: AnalyticsProps) {
+  const totalLikes = posts.reduce((sum, p) => sum + (p.engagement?.likes || 0), 0);
+  const totalComments = posts.reduce((sum, p) => sum + (p.engagement?.comments || 0), 0);
+  const totalShares = posts.reduce((sum, p) => sum + (p.engagement?.shares || 0), 0);
+
+  return (
+    <div className="analytics">
+      <h1>Analytics</h1>
+      <div className="stats-grid">
+        <StatCard title="Gesamt Likes" value={totalLikes} icon="❤️" color="#ec4899" />
+        <StatCard title="Gesamt Kommentare" value={totalComments} icon="💬" color="#3b82f6" />
+        <StatCard title="Gesamt Shares" value={totalShares} icon="🔄" color="#10b981" />
+      </div>
+      <p className="info-text">Detaillierte Analytics-Grafiken kommen bald!</p>
     </div>
   );
 }
 
 function ContentPlanning({ posts }: ContentPlanningProps) {
+  const scheduledPosts = posts.filter(p => p.status === 'scheduled');
+
   return (
     <div className="content-planning">
-      <h1>Content-Planung</h1><p className="subtitle">Plane und verwalte deine Posts</p>
-      <div className="planning-actions"><button className="action-button primary">➕ Neuen Post erstellen</button><button className="action-button secondary">📅 Kalenderansicht</button></div>
-      <div className="scheduled-posts">
-        <h3>Geplante Posts</h3>
-        {posts.length === 0 ? (<div className="empty-state"><span>📭</span><p>Keine geplanten Posts vorhanden</p></div>) : (
-          <div className="posts-list">
-            {posts.map((post: Post, idx: number) => (
-              <div key={idx} className="scheduled-post-item">
-                <div className="post-info"><span className="post-type">{post.contentType}</span><p className="post-preview-text">{post.content}</p><span className="post-time">{new Date(post.timestamp).toLocaleString('de-DE')}</span></div>
-                <div className="post-actions"><button className="icon-button">✏️</button><button className="icon-button danger">🗑️</button></div>
-              </div>
-            ))}
-          </div>
-        )}
+      <h1>Content-Planung</h1>
+      <div className="posts-grid">
+        {scheduledPosts.length > 0 ? scheduledPosts.map((post, idx) => (
+          <PostCard key={idx} post={{
+            platforms: [post.platform || 'Facebook'],
+            status: post.status,
+            date: post.timestamp,
+            content: post.content,
+            likes: post.engagement?.likes || 0,
+            comments: post.engagement?.comments || 0,
+            shares: post.engagement?.shares || 0,
+            imageUrl: post.imageUrl
+          }} />
+        )) : <p className="no-posts">Keine geplanten Posts vorhanden.</p>}
       </div>
     </div>
   );
 }
 
 function Toast({ message, type, onClose }: ToastProps) {
-  useEffect(() => { const timer = setTimeout(onClose, 5000); return () => clearTimeout(timer); }, [onClose]);
-  return (
-    <div className={`toast ${type}`}>
-      <span className="toast-icon">{type === 'success' && '✅'}{type === 'error' && '❌'}{type === 'info' && 'ℹ️'}</span>
-      <span className="toast-message">{message}</span>
-      <button onClick={onClose} className="toast-close">×</button>
-    </div>
-  );
+  useEffect(() => {
+    const timer = setTimeout(onClose, 3000);
+    return () => clearTimeout(timer);
+  }, [onClose]);
+
+  return <div className={`toast ${type}`}>{message}</div>;
 }
 
 export default function App() {
@@ -420,61 +478,110 @@ export default function App() {
     emojiUsage: 'moderate', language: 'de', aiModel: 'gpt-4'
   });
 
-  // LocalStorage Funktionen
-  const saveToLocalStorage = () => {
-    const data = {
-      posts,
-      config,
-      botStatus,
-      timestamp: new Date().toISOString()
-    };
-    localStorage.setItem('socialbot_data', JSON.stringify(data));
-    console.log('Daten gespeichert:', data);
-  };
-
-  const loadFromLocalStorage = () => {
-    const saved = localStorage.getItem('socialbot_data');
-    if (saved) {
-      try {
-        const data = JSON.parse(saved);
-        if (data.posts) setPosts(data.posts);
-        if (data.config) setConfig(data.config);
-        if (data.botStatus !== undefined) setBotStatus(data.botStatus);
-        console.log('Daten geladen:', data);
-        showToast('Daten erfolgreich geladen', 'success');
-      } catch (error) {
-        console.error('Fehler beim Laden:', error);
+  const loadFromSupabase = async () => {
+    try {
+      setIsLoading(true);
+      
+      const loadedPosts = await SupabaseService.getPosts();
+      setPosts(loadedPosts.map(p => ({
+        content: p.content,
+        timestamp: p.created_at || new Date().toISOString(),
+        status: p.status,
+        contentType: 'post',
+        platform: p.platform,
+        engagement: p.engagement || { likes: 0, comments: 0, shares: 0 },
+        imageUrl: p.image_url
+      })));
+      
+      const loadedConfig = await SupabaseService.getConfig();
+      if (loadedConfig) {
+        setConfig({
+          tonality: loadedConfig.tonality,
+          topic: loadedConfig.topic,
+          targetAudience: loadedConfig.target_audience,
+          ageRange: loadedConfig.age_range,
+          postFrequency: loadedConfig.post_frequency,
+          publishWindow: loadedConfig.publish_window,
+          contentMix: loadedConfig.content_mix,
+          hashtags: loadedConfig.hashtags,
+          emojiUsage: loadedConfig.emoji_usage,
+          language: loadedConfig.language,
+          aiModel: loadedConfig.ai_model
+        });
       }
+      
+      const loadedStatus = await SupabaseService.getBotStatus();
+      if (loadedStatus) {
+        setBotStatus(loadedStatus.is_active);
+      }
+      
+      showToast('Daten erfolgreich geladen', 'success');
+    } catch (error) {
+      console.error('Fehler beim Laden:', error);
+      showToast('Fehler beim Laden der Daten', 'error');
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  // Beim Start laden
   useEffect(() => {
     const savedUser = localStorage.getItem('socialbot_user');
     if (savedUser) {
       setUser(savedUser);
       setIsLoggedIn(true);
-      loadFromLocalStorage();
+      loadFromSupabase();
     }
   }, []);
 
-  // Auto-Save bei Änderungen
-  useEffect(() => {
-    if (isLoggedIn && posts.length > 0) {
-      saveToLocalStorage();
+  const saveConfig = async () => {
+    try {
+      await SupabaseService.updateConfig({
+        tonality: config.tonality,
+        topic: config.topic,
+        target_audience: config.targetAudience,
+        age_range: config.ageRange,
+        post_frequency: config.postFrequency,
+        publish_window: config.publishWindow,
+        content_mix: config.contentMix,
+        hashtags: config.hashtags,
+        emoji_usage: config.emojiUsage,
+        language: config.language,
+        ai_model: config.aiModel
+      });
+    } catch (error) {
+      console.error('Fehler beim Speichern der Config:', error);
     }
-  }, [posts]);
+  };
+
+  const saveBotStatus = async () => {
+    try {
+      await SupabaseService.updateBotStatus(botStatus);
+    } catch (error) {
+      console.error('Fehler beim Speichern des Bot-Status:', error);
+    }
+  };
 
   useEffect(() => {
     if (isLoggedIn) {
-      saveToLocalStorage();
+      saveBotStatus();
     }
-  }, [config, botStatus]);
+  }, [botStatus]);
 
-  const handleLogin = (username: string) => { setUser(username); setIsLoggedIn(true); showToast('Erfolgreich angemeldet!', 'success'); };
-  const handleLogout = () => { localStorage.removeItem('socialbot_user'); setUser(null); setIsLoggedIn(false); showToast('Erfolgreich abgemeldet', 'info'); };
-  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => setToast({ message, type });
-  const toggleBot = () => { setBotStatus(!botStatus); showToast(botStatus ? 'Bot wurde pausiert' : 'Bot wurde gestartet', 'success'); };
+  const showToast = (message: string, type: 'success' | 'error' | 'info') => {
+    setToast({ message, type });
+  };
+
+  const handleLogin = (username: string) => {
+    setUser(username);
+    setIsLoggedIn(true);
+    loadFromSupabase();
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('socialbot_user');
+    setIsLoggedIn(false);
+    setUser(null);
+  };
 
   const triggerPost = async () => {
     setIsLoading(true);
@@ -499,38 +606,55 @@ export default function App() {
       const data = await response.json();
       console.log('Full Webhook Response:', JSON.stringify(data, null, 2));
 
-      if (data.success) {
-        const newPosts = data.posts?.map((p: any) => {
-          console.log('Post data:', p);
-          console.log('Image field:', p.image);
-          console.log('ImageData field:', p.imageData);
-          console.log('ImageUrl field:', p.imageUrl);
+      if (data.success && data.posts) {
+        for (const p of data.posts) {
+          let imageUrl = null;
           
-          let imageSource = null;
-          if (p.imageUrl && p.imageUrl.startsWith('http')) {
-            imageSource = p.imageUrl;
-          } else if (p.image) {
-            imageSource = p.image.startsWith('data:image') ? p.image : `data:image/png;base64,${p.image}`;
-          } else if (p.imageData) {
-            imageSource = p.imageData.startsWith('data:image') ? p.imageData : `data:image/png;base64,${p.imageData}`;
+          if (p.image || p.imageData || p.imageUrl) {
+            const imageData = p.imageUrl || p.image || p.imageData;
+            
+            if (imageData.startsWith('http')) {
+              imageUrl = imageData;
+            } else {
+              const base64Data = imageData.replace(/^data:image\/\w+;base64,/, '');
+              const blob = await fetch(`data:image/png;base64,${base64Data}`).then(r => r.blob());
+              
+              const fileName = `post-${Date.now()}-${Math.random().toString(36).substring(7)}.png`;
+              const { data: uploadData, error: uploadError } = await supabase.storage
+                .from('post-images')
+                .upload(fileName, blob, { contentType: 'image/png' });
+              
+              if (!uploadError && uploadData) {
+                const { data: urlData } = supabase.storage
+                  .from('post-images')
+                  .getPublicUrl(fileName);
+                imageUrl = urlData.publicUrl;
+              }
+            }
           }
           
-          console.log('Final image source:', imageSource?.substring(0, 100));
-
-          return {
+          const newPost = await SupabaseService.createPost({
             content: p.content || p.text || '',
-            timestamp: new Date().toISOString(),
-            status: 'posted',
-            contentType: 'post',
             platform: p.platform,
-            engagement: { likes: 0, comments: 0, shares: 0 },
-            imageUrl: imageSource
-          };
-        }) || [];
-
-        setPosts((prev: Post[]) => [...newPosts, ...prev]);
+            status: 'posted',
+            image_url: imageUrl,
+            engagement: { likes: 0, comments: 0, shares: 0 }
+          });
+          
+          if (newPost) {
+            setPosts(prev => [{
+              content: newPost.content,
+              timestamp: newPost.created_at || new Date().toISOString(),
+              status: newPost.status,
+              contentType: 'post',
+              platform: newPost.platform,
+              engagement: newPost.engagement || { likes: 0, comments: 0, shares: 0 },
+              imageUrl: newPost.image_url
+            }, ...prev]);
+          }
+        }
         
-        const platformNames = data.posts?.map((p: any) => p.platform).join(' & ') || 'Facebook & Instagram';
+        const platformNames = data.posts.map((p: any) => p.platform).join(' & ') || 'Facebook & Instagram';
         showToast(`✅ Post erfolgreich auf ${platformNames} veröffentlicht!`, 'success');
       } else {
         showToast('Fehler beim Posten', 'error');
@@ -542,120 +666,31 @@ export default function App() {
     setIsLoading(false);
   };
 
-  const handleSaveSettings = () => {
-    saveToLocalStorage();
-    showToast('Einstellungen erfolgreich gespeichert!', 'success');
+  const handleSaveSettings = async () => {
+    setIsLoading(true);
+    try {
+      await saveConfig();
+      showToast('Einstellungen erfolgreich gespeichert!', 'success');
+    } catch (error) {
+      showToast('Fehler beim Speichern', 'error');
+    }
+    setIsLoading(false);
   };
 
-  if (!isLoggedIn) return <LoginScreen onLogin={handleLogin} />;
+  if (!isLoggedIn) {
+    return <LoginScreen onLogin={handleLogin} />;
+  }
 
   return (
     <div className="app">
       <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} onLogout={handleLogout} />
-      <main className="main-content">
-        {activeTab === 'dashboard' && <Dashboard config={config} posts={posts} botStatus={botStatus} onToggleBot={toggleBot} onTriggerPost={triggerPost} />}
+      <div className="main-content">
+        {isLoading && <div className="loading-overlay"><div className="spinner"></div></div>}
+        {activeTab === 'dashboard' && <Dashboard config={config} posts={posts} botStatus={botStatus} onToggleBot={() => setBotStatus(!botStatus)} onTriggerPost={triggerPost} />}
         {activeTab === 'settings' && <Settings config={config} setConfig={setConfig} onSave={handleSaveSettings} />}
         {activeTab === 'analytics' && <Analytics posts={posts} />}
-        {activeTab === 'content' && <ContentPlanning posts={posts} />}
-      </main>
-      {isLoading && <div className="loading-overlay"><div className="spinner"></div><p>Wird gepostet...</p></div>}
-      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
-    </div>
-  );
-},
-    postFrequency: 3, publishWindow: { start: '09:00', end: '18:00' },
-    contentMix: { tips: 30, quotes: 25, products: 25, news: 20 },
-    hashtags: ['#business', '#success', '#motivation', '#entrepreneur'],
-    emojiUsage: 'moderate', language: 'de', aiModel: 'gpt-4'
-  });
-
-  useEffect(() => { const savedUser = localStorage.getItem('socialbot_user'); if (savedUser) { setUser(savedUser); setIsLoggedIn(true); } }, []);
-
-  const handleLogin = (username: string) => { setUser(username); setIsLoggedIn(true); showToast('Erfolgreich angemeldet!', 'success'); };
-  const handleLogout = () => { localStorage.removeItem('socialbot_user'); setUser(null); setIsLoggedIn(false); showToast('Erfolgreich abgemeldet', 'info'); };
-  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => setToast({ message, type });
-  const toggleBot = () => { setBotStatus(!botStatus); showToast(botStatus ? 'Bot wurde pausiert' : 'Bot wurde gestartet', 'success'); };
-
-  const triggerPost = async () => {
-    setIsLoading(true);
-    try {
-      const response = await fetch(WEBHOOK_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'post',
-          config: {
-            platforms: { facebook: true, instagram: true },
-            tonality: config.tonality,
-            topic: config.topic,
-            targetAudience: config.targetAudience,
-            language: config.language,
-            hashtags: config.hashtags,
-            emojiUsage: config.emojiUsage
-          }
-        })
-      });
-
-      const data = await response.json();
-      console.log('Full Webhook Response:', JSON.stringify(data, null, 2));
-
-      if (data.success) {
-        const newPosts = data.posts?.map((p: any) => {
-          console.log('Post data:', p);
-          console.log('Image field:', p.image);
-          console.log('ImageData field:', p.imageData);
-          console.log('ImageUrl field:', p.imageUrl);
-          
-          // Extrahiere Bild-URL oder Base64
-          let imageSource = null;
-          if (p.imageUrl && p.imageUrl.startsWith('http')) {
-            imageSource = p.imageUrl;
-          } else if (p.image) {
-            // Prüfe ob bereits data:image Prefix vorhanden
-            imageSource = p.image.startsWith('data:image') ? p.image : `data:image/png;base64,${p.image}`;
-          } else if (p.imageData) {
-            imageSource = p.imageData.startsWith('data:image') ? p.imageData : `data:image/png;base64,${p.imageData}`;
-          }
-          
-          console.log('Final image source:', imageSource?.substring(0, 100));
-
-          return {
-            content: p.content || p.text || '',
-            timestamp: new Date().toISOString(),
-            status: 'posted',
-            contentType: 'post',
-            platform: p.platform,
-            engagement: { likes: 0, comments: 0, shares: 0 },
-            imageUrl: imageSource
-          };
-        }) || [];
-
-        setPosts((prev: Post[]) => [...newPosts, ...prev]);
-        
-        const platformNames = data.posts?.map((p: any) => p.platform).join(' & ') || 'Facebook & Instagram';
-        showToast(`✅ Post erfolgreich auf ${platformNames} veröffentlicht!`, 'success');
-      } else {
-        showToast('Fehler beim Posten', 'error');
-      }
-    } catch (error) {
-      console.error('Error:', error);
-      showToast('Verbindungsfehler zum Bot', 'error');
-    }
-    setIsLoading(false);
-  };
-
-  if (!isLoggedIn) return <LoginScreen onLogin={handleLogin} />;
-
-  return (
-    <div className="app">
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} onLogout={handleLogout} />
-      <main className="main-content">
-        {activeTab === 'dashboard' && <Dashboard config={config} posts={posts} botStatus={botStatus} onToggleBot={toggleBot} onTriggerPost={triggerPost} />}
-        {activeTab === 'settings' && <Settings config={config} setConfig={setConfig} />}
-        {activeTab === 'analytics' && <Analytics posts={posts} />}
-        {activeTab === 'content' && <ContentPlanning posts={posts} />}
-      </main>
-      {isLoading && <div className="loading-overlay"><div className="spinner"></div><p>Wird gepostet...</p></div>}
+        {activeTab === 'planning' && <ContentPlanning posts={posts} />}
+      </div>
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </div>
   );
