@@ -6,6 +6,7 @@ interface ImportMetaEnv {
   readonly VITE_WEBHOOK_REGEN_TEXT: string;
   readonly VITE_WEBHOOK_REGEN_IMAGE: string;
   readonly VITE_WEBHOOK_TRIGGER_PLAN: string;
+  readonly VITE_WEBHOOK_PUBLISH_POST: string;
 }
 
 interface ImportMeta {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import './App.css';
 import { SupabaseService } from './supabaseClient';
 import {
@@ -10,6 +10,7 @@ import {
 const WEBHOOK_REGEN_TEXT = import.meta.env.VITE_WEBHOOK_REGEN_TEXT;
 const WEBHOOK_REGEN_IMAGE = import.meta.env.VITE_WEBHOOK_REGEN_IMAGE;
 const WEBHOOK_TRIGGER_PLAN = import.meta.env.VITE_WEBHOOK_TRIGGER_PLAN;
+const WEBHOOK_PUBLISH_POST = import.meta.env.VITE_WEBHOOK_PUBLISH_POST;
 
 const USERS: Record<string, string> = {
   admin: 'admin123',
@@ -246,7 +247,7 @@ function Dashboard({ config, posts, botStatus, onToggleBot }: { config: Config; 
             <div key={idx} className="post-card">
               <div className="post-header">
                 <div className="post-platforms">
-                  {group.platforms.map(p => <span key={p} className={`platform-tag ${p.toLowerCase()}`}>{p}</span>)}
+                  {group.platforms.map(p => <span key={p} className={`platform-tag ${p.toLowerCase().includes('&') ? 'both' : p.toLowerCase()}`}>{p}</span>)}
                 </div>
                 <span className="status-badge posted">✓ Gepostet</span>
               </div>
@@ -399,19 +400,58 @@ function ContentPlanning({ showToast, onReload }: { showToast: (msg: string, typ
     } catch { showToast('Fehler beim Löschen', 'error'); }
   };
 
-  const publishNow = async (id: string) => {
-    if (!window.confirm('Diesen Post jetzt sofort veröffentlichen?')) return;
+  // Publish a single post via webhook
+  const triggerPublish = async (id: string, silent = false) => {
     setPublishing(p => ({ ...p, [id]: true }));
     try {
-      // Set scheduled_at to 1 minute ago so the auto-publisher picks it up immediately
-      const pastTime = new Date(Date.now() - 60000).toISOString();
-      await SupabaseService.updatePost(id, { scheduled_at: pastTime });
-      showToast('Post wird veröffentlicht... Der Auto-Publisher postet ihn in wenigen Minuten.', 'success');
-      await loadScheduled();
-      onReload();
-    } catch { showToast('Fehler beim Veröffentlichen', 'error'); }
+      const res = await fetch(WEBHOOK_PUBLISH_POST, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ postId: id })
+      });
+      if (res.ok) {
+        if (!silent) showToast('Post erfolgreich veröffentlicht! 🎉', 'success');
+        await loadScheduled();
+        onReload();
+      } else {
+        showToast('Fehler beim Veröffentlichen', 'error');
+      }
+    } catch { showToast('Verbindungsfehler zum Bot', 'error'); }
     finally { setPublishing(p => ({ ...p, [id]: false })); }
   };
+
+  const publishNow = async (id: string) => {
+    if (!window.confirm('Diesen Post jetzt sofort veröffentlichen?')) return;
+    await triggerPublish(id);
+  };
+
+  // Auto-publish timers: trigger webhook at scheduled time
+  const publishTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  useEffect(() => {
+    // Clear old timers
+    Object.values(publishTimers.current).forEach(t => clearTimeout(t));
+    publishTimers.current = {};
+
+    scheduledPosts.forEach(post => {
+      if (!post.scheduled_at || post.status !== 'scheduled') return;
+      const delay = new Date(post.scheduled_at).getTime() - Date.now();
+
+      if (delay <= 0) {
+        // Already due – publish immediately
+        triggerPublish(post.id, true);
+      } else if (delay < 24 * 60 * 60 * 1000) {
+        // Within 24h – set timer
+        publishTimers.current[post.id] = setTimeout(() => {
+          triggerPublish(post.id, true);
+        }, delay);
+      }
+    });
+
+    return () => {
+      Object.values(publishTimers.current).forEach(t => clearTimeout(t));
+    };
+  }, [scheduledPosts]);
 
   const handleImageUpload = async (postId: string, file: File) => {
     // Validate file before uploading
@@ -537,7 +577,7 @@ function ContentPlanning({ showToast, onReload }: { showToast: (msg: string, typ
                   <span className={`pcard-countdown ${new Date(post.scheduled_at) < new Date() ? 'overdue' : ''}`}>
                     {post.scheduled_at ? getTimeUntil(post.scheduled_at) : 'Kein Datum'}
                   </span>
-                  <span className={`platform-tag ${(post.platform || 'facebook').toLowerCase()}`}>
+                  <span className={`platform-tag ${(post.platform || 'facebook').toLowerCase().includes('&') ? 'both' : (post.platform || 'facebook').toLowerCase()}`}>
                     {post.platform || 'Facebook'}
                   </span>
                 </div>
@@ -1047,7 +1087,7 @@ function Analytics({ posts }: { posts: Post[] }) {
                 <div className="best-post-rank">#{idx + 1}</div>
                 <div className="best-post-content">
                   <div className="best-post-platform">
-                    <span className={`platform-tag ${(post.platform || 'facebook').toLowerCase()}`}>{post.platform || 'Facebook'}</span>
+                    <span className={`platform-tag ${(post.platform || 'facebook').toLowerCase().includes('&') ? 'both' : (post.platform || 'facebook').toLowerCase()}`}>{post.platform || 'Facebook'}</span>
                     <span className="best-post-date">{new Date(post.timestamp).toLocaleDateString('de-DE')}</span>
                   </div>
                   <p className="best-post-text">{post.content}</p>
