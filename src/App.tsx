@@ -7,9 +7,9 @@ import {
 } from 'recharts';
 
 // ============ WEBHOOK URLS ============
-const WEBHOOK_REGEN_TEXT = 'https://n8n.srv1274405.hstgr.cloud/webhook/regenerate-text';
-const WEBHOOK_REGEN_IMAGE = 'https://n8n.srv1274405.hstgr.cloud/webhook/regenerate-image';
-const WEBHOOK_TRIGGER_PLAN = 'https://n8n.srv1274405.hstgr.cloud/webhook/trigger-planning';
+const WEBHOOK_REGEN_TEXT = import.meta.env.VITE_WEBHOOK_REGEN_TEXT;
+const WEBHOOK_REGEN_IMAGE = import.meta.env.VITE_WEBHOOK_REGEN_IMAGE;
+const WEBHOOK_TRIGGER_PLAN = import.meta.env.VITE_WEBHOOK_TRIGGER_PLAN;
 
 const USERS: Record<string, string> = {
   admin: 'admin123',
