@@ -1,0 +1,1304 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "fb_page_id",
+              "name": "fbPageId",
+              "value": "705831065938033",
+              "type": "string"
+            },
+            {
+              "id": "fb_access_token",
+              "name": "fbAccessToken",
+              "value": "EAAKFs03TXsYBQtdCMiZCQnjeCj1pLx95b5Dc1UIw1ZCQSy9ZBn3XQutnJVANqbkzWnlHZCBtyTbR7PYnZA5ImKQ3strZAV92g0brm3RZBV7IiGZC8KGxXZAQ4GaWs5VsEZCL72nXCY1cC6fO9v2i4RNwYs8h5HvRSIaU4GDRXLbeujnE7PoEsWXkxrISEJD0GptlDF12pDAEKZA0ZCKjk7XYMZAla",
+              "type": "string"
+            },
+            {
+              "id": "ig_account_id",
+              "name": "igAccountId",
+              "value": "DEINE_INSTAGRAM_ACCOUNT_ID_HIER_EINTRAGEN",
+              "type": "string"
+            },
+            {
+              "id": "ig_access_token",
+              "name": "igAccessToken",
+              "value": "DEIN_INSTAGRAM_ACCESS_TOKEN_HIER_EINTRAGEN",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d11302e8-f1b0-4a99-a4aa-bbf89ebf9db0",
+      "name": "🔑 API Credentials (HIER EINTRAGEN!)1",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        -10032,
+        1248
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "social-bot-trigger",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "af72bff8-f7f4-462a-8e65-b4952d3dfbc6",
+      "name": "Bot Trigger Webhook1",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        -10368,
+        1536
+      ],
+      "webhookId": "1cbeb9d6-184d-4e1c-a049-7c4f1ef8a54c"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Hole die Webhook-Daten\nconst body = $input.first().json.body || $input.first().json;\nconst config = body.config || {};\n\n// Plattformen verarbeiten\nlet plattformen = [];\nif (config.platforms) {\n  if (config.platforms.facebook) plattformen.push('Facebook');\n  if (config.platforms.instagram) plattformen.push('Instagram');\n  if (config.platforms.linkedin) plattformen.push('LinkedIn');\n  if (config.platforms.twitter) plattformen.push('Twitter');\n}\nif (plattformen.length === 0) plattformen = ['Facebook', 'Instagram'];\n\n// Plattformen als Text\nconst plattformen_text = plattformen.length === 1 \n  ? plattformen[0] \n  : plattformen.slice(0, -1).join(', ') + ' und ' + plattformen[plattformen.length - 1];\n\n// Tonalität mapping\nconst tonalityMap = {\n  'professional': 'professionell',\n  'casual': 'locker und freundlich',\n  'humorous': 'humorvoll',\n  'inspiring': 'inspirierend'\n};\n\n// Zielgruppe mapping\nconst audienceMap = {\n  'b2b': 'B2B Geschäftskunden',\n  'b2c': 'B2C Endverbraucher',\n  'both': 'B2B und B2C'\n};\n\n// Emoji-Hinweis\nconst emojiMap = {\n  'none': 'Keine Emojis verwenden',\n  'minimal': 'Wenige Emojis (1-2)',\n  'moderate': 'Moderate Emoji-Nutzung (3-5)',\n  'heavy': 'Viele Emojis verwenden'\n};\n\n// Hashtags als String\nconst hashtagString = Array.isArray(config.hashtags) \n  ? config.hashtags.join(' ') \n  : (config.hashtags || '#business #success');\n\n// Sprache\nconst languageMap = {\n  'de': 'Deutsch',\n  'en': 'Englisch'\n};\n\n// Image Prompt erstellen\nconst imagePrompt = `Generiere ein Bild für einen Social Media Post. Thema: ${config.topic || 'Business & Erfolg'}. Stil: ${tonalityMap[config.tonality] || 'professionell'}, modern, ansprechend. Zielgruppe: ${audienceMap[config.targetAudience] || 'Allgemeine Zielgruppe'}. Das Bild soll für ${plattformen_text} optimiert sein. Kein Text im Bild.`;\n\n// Rückgabe der formatierten Daten\nreturn {\n  json: {\n    thema: config.topic || 'Business & Erfolg',\n    zielgruppe: audienceMap[config.targetAudience] || 'Allgemeine Zielgruppe',\n    tonalitaet: tonalityMap[config.tonality] || 'professionell',\n    plattformen: plattformen,\n    plattformen_text: plattformen_text,\n    hinweise: `Sprache: ${languageMap[config.language] || 'Deutsch'}. ${emojiMap[config.emojiUsage] || ''}. Hashtags: ${hashtagString}`,\n    hashtags: hashtagString,\n    language: config.language || 'de',\n    emojiUsage: config.emojiUsage || 'moderate',\n    timestamp: new Date().toISOString(),\n    imagePrompt: imagePrompt\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -10144,
+        1536
+      ],
+      "id": "3640ae3c-ac3f-4ba6-9256-a5c3b6d0a9d1",
+      "name": "Daten Formatieren1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.langdock.com/assistant/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"assistantId\": \"492c18cd-ec6a-464b-a66e-55cd7ba5c925\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Erstelle einen Social Media Post zum Thema: {{ $('Daten Formatieren1').item.json.thema }}.\\n\\nZielgruppe: {{ $('Daten Formatieren1').item.json.zielgruppe }}\\nTonalität: {{ $('Daten Formatieren1').item.json.tonalitaet }}\\nPlattformen: {{ $('Daten Formatieren1').item.json.plattformen_text }}\\nSprache: {{ $('Daten Formatieren1').item.json.language }}\\n\\nZusätzliche Hinweise: {{ $('Daten Formatieren1').item.json.hinweise }}\\n\\nHashtags zum Einbauen: {{ $('Daten Formatieren1').item.json.hashtags }}\"\n    }\n  ],\n  \"stream\": false\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -9936,
+        1424
+      ],
+      "id": "805ad709-38ab-49ed-88e2-029ac18b625d",
+      "name": "Langdock GPT 4.",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "xSTeOs52g0JtsVb6",
+          "name": "Langdock (vital-growth)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.langdock.com/assistant/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"assistantId\": \"9382481c-6cca-4758-b25e-93688a0a249f\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"{{ $('Daten Formatieren1').item.json.imagePrompt }}\"\n    }\n  ],\n  \"stream\": false\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -9936,
+        1632
+      ],
+      "id": "51e20f81-331a-411c-b9f3-e2ed7ee74988",
+      "name": "Langdock Gemini 2.5 (Bildgen)1",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "xSTeOs52g0JtsVb6",
+          "name": "Langdock (vital-growth)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Langdock Response parsen\nconst langdockResponse = $input.first().json;\n\n// Content aus Langdock extrahieren\nlet generatedContent = '';\n\nif (langdockResponse.result && langdockResponse.result[0]) {\n  generatedContent = langdockResponse.result[0].content || '';\n} else if (langdockResponse.choices && langdockResponse.choices[0]) {\n  generatedContent = langdockResponse.choices[0].message?.content || '';\n} else if (langdockResponse.content) {\n  generatedContent = langdockResponse.content;\n}\n\nreturn {\n  json: {\n    content: generatedContent\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -8592,
+        1424
+      ],
+      "id": "ff1ad2de-e376-4514-a7d4-2d88da57f081",
+      "name": "Langdock Response Parser1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Bild Response Parser - für Langdock Format\nconst langdockResponse = $input.first().json;\n\nlet imageData = '';\nlet isBase64 = false;\n\n// Langdock Format: result[].content[].output.value.images[].base64\nif (langdockResponse.result && Array.isArray(langdockResponse.result)) {\n  for (const entry of langdockResponse.result) {\n    if (entry.role === 'tool' && entry.content && Array.isArray(entry.content)) {\n      for (const contentItem of entry.content) {\n        if (contentItem.type === 'tool-result' && contentItem.output) {\n          const output = contentItem.output;\n          \n          // Prüfe output.value.images[]\n          if (output.value && output.value.images && Array.isArray(output.value.images)) {\n            for (const img of output.value.images) {\n              if (img.base64) {\n                // Base64-String gefunden\n                const base64String = img.base64;\n                if (base64String.startsWith('data:image')) {\n                  imageData = base64String;\n                } else {\n                  imageData = 'data:image/png;base64,' + base64String;\n                }\n                isBase64 = true;\n                break;\n              } else if (img.url && img.url !== 'N/A') {\n                imageData = img.url;\n                isBase64 = false;\n                break;\n              }\n            }\n          }\n          \n          if (imageData) break;\n        }\n      }\n    }\n    if (imageData) break;\n  }\n}\n\nreturn {\n  json: {\n    imageUrl: isBase64 ? '' : imageData,\n    imageData: isBase64 ? imageData : '',\n    isBase64: isBase64,\n    hasImage: imageData !== ''\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -9712,
+        1632
+      ],
+      "id": "b17a63d8-4802-4ad2-a4f3-9e0e9c2a3bdb",
+      "name": "Bild Response Parser1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Base64 Bild für Supabase Upload vorbereiten\nconst imageData = $input.first().json.imageData || '';\nconst hasImage = $input.first().json.hasImage || false;\nconst imageUrl = $input.first().json.imageUrl || '';\n\n// Wenn kein Bild vorhanden\nif (!hasImage) {\n  return {\n    json: {\n      skipUpload: true,\n      imageUrl: '',\n      fileName: '',\n      hasImage: false\n    }\n  };\n}\n\n// Wenn bereits eine URL (kein Base64)\nif (imageUrl && !$input.first().json.isBase64) {\n  return {\n    json: {\n      skipUpload: true,\n      imageUrl: imageUrl,\n      fileName: '',\n      hasImage: true\n    }\n  };\n}\n\nif (!imageData) {\n  return {\n    json: {\n      skipUpload: true,\n      imageUrl: '',\n      fileName: '',\n      hasImage: false\n    }\n  };\n}\n\nconst timestamp = new Date().getTime();\nconst fileName = `post_${timestamp}.png`;\n\n// Base64 String extrahieren (ohne data:image/png;base64, prefix)\nlet base64Clean = imageData;\nif (imageData.includes(',')) {\n  base64Clean = imageData.split(',')[1];\n}\n\nreturn {\n  json: {\n    fileName: fileName,\n    contentType: 'image/png',\n    timestamp: timestamp,\n    skipUpload: false\n  },\n  binary: {\n    data: {\n      data: base64Clean,\n      mimeType: 'image/png',\n      fileName: fileName\n    }\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -9488,
+        1632
+      ],
+      "id": "e725f9b0-aa90-4f33-be7b-5b983fc4c6c9",
+      "name": "Upload Vorbereitung"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.skipUpload }}"
+            }
+          ]
+        }
+      },
+      "id": "ac6651c5-7973-4a89-9000-429bf75c2de4",
+      "name": "IF - Upload nötig?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -9264,
+        1632
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://iosuxvmkcmgenesirlfb.supabase.co/storage/v1/object/social-media-images/{{ $json.fileName }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlvc3V4dm1rY21nZW5lc2lybGZiIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDE0NDA1MywiZXhwIjoyMDg1NzIwMDUzfQ.g_mnc9Ry6XE5_P1zh_1altV2qpVM1HcfILs6xaInrs0"
+            },
+            {
+              "name": "Content-Type",
+              "value": "image/png"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -9040,
+        1504
+      ],
+      "id": "ab4488bf-a9ce-42fe-8c16-830eba3de95d",
+      "name": "Supabase Storage Upload",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "sn39tx0gzskE7gUI",
+          "name": "SupabaseStorage"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Öffentliche URL nach Supabase Upload generieren\nconst uploadVorbereitung = $node[\"Upload Vorbereitung\"].json;\nconst fileName = uploadVorbereitung.fileName || '';\n\nif (!fileName) {\n  return {\n    json: {\n      imageUrl: '',\n      hasImage: false,\n      uploadSuccess: false\n    }\n  };\n}\n\n// Öffentliche URL generieren\nconst publicUrl = `https://iosuxvmkcmgenesirlfb.supabase.co/storage/v1/object/public/social-media-images/${fileName}`;\n\nreturn {\n  json: {\n    imageUrl: publicUrl,\n    fileName: fileName,\n    hasImage: true,\n    uploadSuccess: true\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -8816,
+        1504
+      ],
+      "id": "03b7d9e7-029f-4bbb-bbcf-3d73a83a3634",
+      "name": "URL Parser nach Upload"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Daten ohne Upload weiterleiten\nconst data = $node[\"Upload Vorbereitung\"].json;\n\nreturn {\n  json: {\n    imageUrl: data.imageUrl || '',\n    hasImage: data.hasImage || false,\n    uploadSuccess: true\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -8928,
+        1760
+      ],
+      "id": "508374b3-fc95-4c85-ba89-7c52af702519",
+      "name": "Kein Upload nötig"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      },
+      "id": "5bccd0bf-8009-4b51-a772-0ef2f32a5747",
+      "name": "Merge nach Upload",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [
+        -8592,
+        1632
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      },
+      "id": "5e907ed9-43ee-4aae-b259-f1dc87cc8390",
+      "name": "Content zusammenführen1",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [
+        -8368,
+        1536
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Daten für API vorbereiten - KORRIGIERT!\nconst data = $input.first().json;\nconst formattedData = $('Daten Formatieren1').first().json;\nconst credentials = $('🔑 API Credentials (HIER EINTRAGEN!)1').first().json;\n\nreturn {\n  json: {\n    content: data.content,\n    imageUrl: data.imageUrl,\n    hasImage: data.hasImage || false,\n    plattformen: formattedData.plattformen,\n    timestamp: new Date().toISOString(),\n    // Credentials vom Credentials-Node holen\n    fbPageId: credentials.fbPageId,\n    fbAccessToken: credentials.fbAccessToken,\n    igAccountId: credentials.igAccountId,\n    igAccessToken: credentials.igAccessToken\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -10112,
+        2112
+      ],
+      "id": "388df907-ede3-437e-a8b5-a25d5fd0ee77",
+      "name": "Daten für API vorbereiten"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.plattformen.includes('Facebook') }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "56770f72-5f47-4958-9c55-0019e0b61717",
+      "name": "IF - Facebook aktiviert?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -9888,
+        2000
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.plattformen.includes('Instagram') }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "007beecd-716b-48e2-a3db-1dd29610f0d1",
+      "name": "IF - Instagram aktiviert?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -9888,
+        2208
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v19.0/{{ $json.fbPageId }}/photos",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "access_token",
+              "value": "={{ $json.fbAccessToken }}"
+            },
+            {
+              "name": "message",
+              "value": "={{ $json.content }}"
+            },
+            {
+              "name": "url",
+              "value": "={{ $json.imageUrl }}"
+            },
+            {
+              "name": "published",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -9664,
+        1920
+      ],
+      "id": "fb133de0-a49f-43f2-9237-2b65d28266cc",
+      "name": "Facebook API - Post"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Facebook Response Parser\nconst response = $input.first().json;\nconst inputData = $node[\"Daten für API vorbereiten\"].json;\n\nreturn {\n  json: {\n    platform: 'Facebook',\n    status: response.id ? 'success' : 'failed',\n    postId: response.id || 'error',\n    content: inputData.content,\n    imageUrl: inputData.imageUrl,\n    error: response.error?.message || null,\n    timestamp: new Date().toISOString()\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -9440,
+        1920
+      ],
+      "id": "2e8e9f57-0cbf-4017-9695-c0e07bbe2fbe",
+      "name": "Facebook Response"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v19.0/{{ $json.igAccountId }}/media",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "access_token",
+              "value": "={{ $json.igAccessToken }}"
+            },
+            {
+              "name": "image_url",
+              "value": "={{ $json.imageUrl }}"
+            },
+            {
+              "name": "caption",
+              "value": "={{ $json.content }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -9664,
+        2288
+      ],
+      "id": "2324dfd4-f683-42d1-bdb9-a681597b18e1",
+      "name": "Instagram API - Create Media"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v19.0/{{ $node['Daten für API vorbereiten'].json.igAccountId }}/media_publish",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "access_token",
+              "value": "={{ $node['Daten für API vorbereiten'].json.igAccessToken }}"
+            },
+            {
+              "name": "creation_id",
+              "value": "={{ $json.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -9440,
+        2288
+      ],
+      "id": "db423bcc-1ad5-4eaa-804f-50150a25b3e6",
+      "name": "Instagram API - Publish"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Instagram Response Parser\nconst response = $input.first().json;\nconst inputData = $node[\"Daten für API vorbereiten\"].json;\n\nreturn {\n  json: {\n    platform: 'Instagram',\n    status: response.id ? 'success' : 'failed',\n    postId: response.id || 'error',\n    content: inputData.content,\n    imageUrl: inputData.imageUrl,\n    error: response.error?.message || null,\n    timestamp: new Date().toISOString()\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -9232,
+        2288
+      ],
+      "id": "b8da44a9-e171-4358-989a-c228b9817fd6",
+      "name": "Instagram Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Supabase Post-Daten vorbereiten (Facebook)\nconst item = $input.first().json;\n\nif (item.status !== 'success') {\n  return { json: { ...item, skipSave: true } };\n}\n\nconst postData = {\n  content: item.content,\n  platform: item.platform,\n  status: 'posted',\n  image_url: item.imageUrl || null,\n  engagement: { likes: 0, comments: 0, shares: 0 },\n  fb_post_id: item.postId\n};\n\nreturn { json: { ...item, supabaseData: postData, skipSave: false } };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -9216,
+        1920
+      ],
+      "id": "4c411209-5c86-4078-aa2d-82b6c8e731be",
+      "name": "📦 Supabase Daten (FB)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://iosuxvmkcmgenesirlfb.supabase.co/rest/v1/posts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlvc3V4dm1rY21nZW5lc2lybGZiIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDE0NDA1MywiZXhwIjoyMDg1NzIwMDUzfQ.g_mnc9Ry6XE5_P1zh_1altV2qpVM1HcfILs6xaInrs0"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlvc3V4dm1rY21nZW5lc2lybGZiIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDE0NDA1MywiZXhwIjoyMDg1NzIwMDUzfQ.g_mnc9Ry6XE5_P1zh_1altV2qpVM1HcfILs6xaInrs0"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.supabaseData) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -8992,
+        1920
+      ],
+      "id": "26f25e63-b433-4262-8c01-a1f3dd4038de",
+      "name": "💾 Supabase Insert (FB)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Supabase Post-Daten vorbereiten (Instagram)\nconst item = $input.first().json;\n\nif (item.status !== 'success') {\n  return { json: { ...item, skipSave: true } };\n}\n\nconst postData = {\n  content: item.content,\n  platform: item.platform,\n  status: 'posted',\n  image_url: item.imageUrl || null,\n  engagement: { likes: 0, comments: 0, shares: 0 },\n  ig_post_id: item.postId\n};\n\nreturn { json: { ...item, supabaseData: postData, skipSave: false } };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -9008,
+        2288
+      ],
+      "id": "33c99d3e-2331-4aa1-8d02-78b4373a4ecf",
+      "name": "📦 Supabase Daten (IG)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://iosuxvmkcmgenesirlfb.supabase.co/rest/v1/posts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlvc3V4dm1rY21nZW5lc2lybGZiIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDE0NDA1MywiZXhwIjoyMDg1NzIwMDUzfQ.g_mnc9Ry6XE5_P1zh_1altV2qpVM1HcfILs6xaInrs0"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlvc3V4dm1rY21nZW5lc2lybGZiIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDE0NDA1MywiZXhwIjoyMDg1NzIwMDUzfQ.g_mnc9Ry6XE5_P1zh_1altV2qpVM1HcfILs6xaInrs0"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.supabaseData) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -8784,
+        2288
+      ],
+      "id": "c42c7998-ec4b-48a7-bf99-1f130bb14c4f",
+      "name": "💾 Supabase Insert (IG)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Response Builder - FINAL\nconst allItems = $input.all();\n\nconst posts = allItems.map(item => ({\n  platform: item.json.platform,\n  status: item.json.status,\n  postId: item.json.postId,\n  content: item.json.content,\n  imageUrl: item.json.imageUrl,\n  error: item.json.error,\n  timestamp: item.json.timestamp\n}));\n\nconst successCount = posts.filter(p => p.status === 'success').length;\nconst failedCount = posts.filter(p => p.status === 'failed').length;\n\nreturn {\n  json: {\n    success: failedCount === 0,\n    message: `${successCount} Posts erfolgreich veröffentlicht${failedCount > 0 ? ', ' + failedCount + ' fehlgeschlagen' : ''}`,\n    posts: posts,\n    timestamp: new Date().toISOString(),\n    totalPosts: posts.length,\n    successCount: successCount,\n    failedCount: failedCount\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -8560,
+        2112
+      ],
+      "id": "3ae9ac18-7768-4a42-a8d8-a3afb53e7220",
+      "name": "Response Builder1"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "ffd50697-6a65-421b-a533-88c8c430772f",
+      "name": "Response senden1",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        -8336,
+        2112
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 4
+            }
+          ]
+        }
+      },
+      "id": "8d4ecf89-0873-4873-b01b-e5f05a200423",
+      "name": "⏰ Alle 4 Stunden",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -10368,
+        2816
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "fb_access_token",
+              "name": "fbAccessToken",
+              "value": "EAAKFs03TXsYBQtdCMiZCQnjeCj1pLx95b5Dc1UIw1ZCQSy9ZBn3XQutnJVANqbkzWnlHZCBtyTbR7PYnZA5ImKQ3strZAV92g0brm3RZBV7IiGZC8KGxXZAQ4GaWs5VsEZCL72nXCY1cC6fO9v2i4RNwYs8h5HvRSIaU4GDRXLbeujnE7PoEsWXkxrISEJD0GptlDF12pDAEKZA0ZCKjk7XYMZAla",
+              "type": "string"
+            },
+            {
+              "id": "fb_page_id",
+              "name": "fbPageId",
+              "value": "705831065938033",
+              "type": "string"
+            },
+            {
+              "id": "supabase_url",
+              "name": "supabaseUrl",
+              "value": "https://iosuxvmkcmgenesirlfb.supabase.co",
+              "type": "string"
+            },
+            {
+              "id": "supabase_key",
+              "name": "supabaseKey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlvc3V4dm1rY21nZW5lc2lybGZiIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDE0NDA1MywiZXhwIjoyMDg1NzIwMDUzfQ.g_mnc9Ry6XE5_P1zh_1altV2qpVM1HcfILs6xaInrs0",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a2b45a4b-d63a-4dfd-8c36-9db755e0610b",
+      "name": "🔑 Credentials",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        -10144,
+        2816
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://iosuxvmkcmgenesirlfb.supabase.co/rest/v1/posts?select=id,fb_post_id,ig_post_id,platform&status=eq.posted&or=(fb_post_id.neq.,ig_post_id.neq.)&order=created_at.desc&limit=50",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $json.supabaseKey }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.supabaseKey }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "96083f41-4764-4547-beeb-63948e135e54",
+      "name": "📥 Posts aus Supabase laden",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -9920,
+        2816
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const credentials = $('🔑 Credentials').first().json;\nconst responseData = $input.first().json;\n\nlet posts = [];\nif (Array.isArray(responseData)) {\n  posts = responseData;\n} else {\n  posts = $input.all().map(i => i.json);\n}\n\nconst postsWithIds = posts.filter(\n  p => (p.fb_post_id && p.fb_post_id !== null && p.fb_post_id !== '') || \n       (p.ig_post_id && p.ig_post_id !== null && p.ig_post_id !== '')\n);\n\nif (postsWithIds.length === 0) {\n  return { json: { skip: true, message: 'Keine Posts mit Post-IDs gefunden' } };\n}\n\nreturn postsWithIds.map(p => {\n  let fbId = p.fb_post_id || '';\n  if (fbId && !fbId.includes('_')) {\n    fbId = credentials.fbPageId + '_' + fbId;\n  }\n  return {\n    json: {\n      id: p.id,\n      fb_post_id: fbId,\n      ig_post_id: p.ig_post_id || '',\n      platform: p.platform,\n      fbAccessToken: credentials.fbAccessToken,\n      supabaseUrl: credentials.supabaseUrl,\n      supabaseKey: credentials.supabaseKey\n    }\n  };\n});"
+      },
+      "id": "d1a59507-f804-4e47-91d8-61528232fa47",
+      "name": "🔍 Posts mit IDs filtern",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -9696,
+        2816
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.skip }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "97a7f388-1e2c-43bd-83d2-775d20a6400b",
+      "name": "IF - Posts vorhanden?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -9488,
+        2816
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return { json: { message: 'Keine Posts mit Post-IDs vorhanden. Übersprungen.' } };"
+      },
+      "id": "f63c39d8-95d4-45c3-9e58-603cadc52809",
+      "name": "⏭️ Übersprungen",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -9264,
+        2944
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.fb_post_id }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "8e9f45cf-48d9-44e4-8a2b-f5e7ca8e3c52",
+      "name": "IF - Hat FB ID?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -9264,
+        2704
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://graph.facebook.com/v19.0/{{ $json.fb_post_id }}?fields=likes.summary(true),comments.summary(true),shares&access_token={{ $json.fbAccessToken }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "0fead651-8d44-43a3-b59b-e0b93e06cdce",
+      "name": "📊 Facebook Engagement",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -9040,
+        2592
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const fb = $input.first().json;\nconst prev = $('IF - Hat FB ID?').first().json;\n\nlet likes = 0, comments = 0, shares = 0;\n\nif (!fb.error) {\n  likes = fb.likes?.summary?.total_count || 0;\n  comments = fb.comments?.summary?.total_count || 0;\n  shares = fb.shares?.count || 0;\n}\n\nreturn {\n  json: {\n    id: prev.id,\n    engagement: { likes, comments, shares },\n    source: fb.error ? 'fb_error' : 'facebook',\n    supabaseUrl: prev.supabaseUrl,\n    supabaseKey: prev.supabaseKey\n  }\n};"
+      },
+      "id": "ca6b448d-95b6-45f2-af93-f04a65fff6f1",
+      "name": "📋 FB Ergebnis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -8816,
+        2592
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $input.first().json;\nreturn {\n  json: {\n    id: prev.id,\n    engagement: { likes: 0, comments: 0, shares: 0 },\n    source: 'no_fb_id',\n    supabaseUrl: prev.supabaseUrl,\n    supabaseKey: prev.supabaseKey\n  }\n};"
+      },
+      "id": "2c623e5d-9e51-4d9a-874b-74a96ea024e9",
+      "name": "📋 Kein FB",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -9040,
+        2800
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $json.supabaseUrl }}/rest/v1/posts?id=eq.{{ $json.id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $json.supabaseKey }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.supabaseKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"engagement\": {{ JSON.stringify($json.engagement) }},\n  \"engagement_updated_at\": \"{{ new Date().toISOString() }}\"\n}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "cdc456a1-df01-47af-8a52-10d7bd9b49ea",
+      "name": "💾 Supabase updaten",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -8608,
+        2704
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn { json: { message: `${items.length} Posts aktualisiert`, timestamp: new Date().toISOString() } };"
+      },
+      "id": "c6e64aa9-04aa-4245-915a-ad0da4d905e5",
+      "name": "✅ Zusammenfassung",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -8384,
+        2704
+      ]
+    }
+  ],
+  "connections": {
+    "Bot Trigger Webhook1": {
+      "main": [
+        [
+          {
+            "node": "Daten Formatieren1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daten Formatieren1": {
+      "main": [
+        [
+          {
+            "node": "Langdock GPT 4.",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Langdock Gemini 2.5 (Bildgen)1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🔑 API Credentials (HIER EINTRAGEN!)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Langdock GPT 4.": {
+      "main": [
+        [
+          {
+            "node": "Langdock Response Parser1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Langdock Gemini 2.5 (Bildgen)1": {
+      "main": [
+        [
+          {
+            "node": "Bild Response Parser1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Langdock Response Parser1": {
+      "main": [
+        [
+          {
+            "node": "Content zusammenführen1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bild Response Parser1": {
+      "main": [
+        [
+          {
+            "node": "Upload Vorbereitung",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Vorbereitung": {
+      "main": [
+        [
+          {
+            "node": "IF - Upload nötig?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Upload nötig?": {
+      "main": [
+        [
+          {
+            "node": "Supabase Storage Upload",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Kein Upload nötig",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase Storage Upload": {
+      "main": [
+        [
+          {
+            "node": "URL Parser nach Upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "URL Parser nach Upload": {
+      "main": [
+        [
+          {
+            "node": "Merge nach Upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Kein Upload nötig": {
+      "main": [
+        [
+          {
+            "node": "Merge nach Upload",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge nach Upload": {
+      "main": [
+        [
+          {
+            "node": "Content zusammenführen1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Content zusammenführen1": {
+      "main": [
+        [
+          {
+            "node": "Daten für API vorbereiten",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daten für API vorbereiten": {
+      "main": [
+        [
+          {
+            "node": "IF - Facebook aktiviert?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "IF - Instagram aktiviert?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Facebook aktiviert?": {
+      "main": [
+        [
+          {
+            "node": "Facebook API - Post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Instagram aktiviert?": {
+      "main": [
+        [
+          {
+            "node": "Instagram API - Create Media",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Facebook API - Post": {
+      "main": [
+        [
+          {
+            "node": "Facebook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Facebook Response": {
+      "main": [
+        [
+          {
+            "node": "📦 Supabase Daten (FB)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Instagram API - Create Media": {
+      "main": [
+        [
+          {
+            "node": "Instagram API - Publish",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Instagram API - Publish": {
+      "main": [
+        [
+          {
+            "node": "Instagram Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Instagram Response": {
+      "main": [
+        [
+          {
+            "node": "📦 Supabase Daten (IG)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📦 Supabase Daten (FB)": {
+      "main": [
+        [
+          {
+            "node": "💾 Supabase Insert (FB)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Supabase Insert (FB)": {
+      "main": [
+        [
+          {
+            "node": "Response Builder1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📦 Supabase Daten (IG)": {
+      "main": [
+        [
+          {
+            "node": "💾 Supabase Insert (IG)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Supabase Insert (IG)": {
+      "main": [
+        [
+          {
+            "node": "Response Builder1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Response Builder1": {
+      "main": [
+        [
+          {
+            "node": "Response senden1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⏰ Alle 4 Stunden": {
+      "main": [
+        [
+          {
+            "node": "🔑 Credentials",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔑 Credentials": {
+      "main": [
+        [
+          {
+            "node": "📥 Posts aus Supabase laden",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📥 Posts aus Supabase laden": {
+      "main": [
+        [
+          {
+            "node": "🔍 Posts mit IDs filtern",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔍 Posts mit IDs filtern": {
+      "main": [
+        [
+          {
+            "node": "IF - Posts vorhanden?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Posts vorhanden?": {
+      "main": [
+        [
+          {
+            "node": "⏭️ Übersprungen",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IF - Hat FB ID?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Hat FB ID?": {
+      "main": [
+        [
+          {
+            "node": "📊 Facebook Engagement",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📋 Kein FB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 Facebook Engagement": {
+      "main": [
+        [
+          {
+            "node": "📋 FB Ergebnis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📋 FB Ergebnis": {
+      "main": [
+        [
+          {
+            "node": "💾 Supabase updaten",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📋 Kein FB": {
+      "main": [
+        [
+          {
+            "node": "💾 Supabase updaten",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Supabase updaten": {
+      "main": [
+        [
+          {
+            "node": "✅ Zusammenfassung",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "c6f50e165e9fde6bc85bfdf30137d97cfd3365165dd7c9e47b99856b2304288a"
+  }
+}
