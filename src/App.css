@@ -186,8 +186,14 @@ body {
 .stat-title { font-size: 14px; color: var(--gray); font-weight: 500; }
 
 /* Bot Control */
-.bot-control-panel { background: var(--white); padding: 28px; border-radius: var(--radius-lg); box-shadow: var(--shadow); margin-bottom: 32px; }
+.bot-control-panel { background: var(--white); padding: 28px; border-radius: var(--radius-lg); box-shadow: var(--shadow); margin-bottom: 32px; transition: all 0.3s; }
+.bot-control-panel.bot-inactive {
+  background: #fef2f2; border: 2px solid #fecaca;
+}
+.bot-control-panel.bot-inactive .bot-status-header h2 { color: #991b1b; }
+.bot-control-panel.bot-inactive .bot-info p { color: #b91c1c; }
 .bot-status-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.bot-status-header:last-child { margin-bottom: 0; }
 .bot-status-header h2 { font-size: 20px; font-weight: 700; color: var(--dark); }
 .bot-toggle-button {
   width: 80px; height: 40px; background: var(--gray); border-radius: 20px;
@@ -470,6 +476,7 @@ body {
 .analytics h1 { font-size: 32px; font-weight: 700; color: var(--dark); }
 .analytics-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 32px; }
 .analytics-header h1 { margin-bottom: 0; }
+.analytics-header-actions { display: flex; align-items: center; gap: 12px; }
 .time-range-buttons { display: flex; gap: 8px; background: var(--white); padding: 4px; border-radius: var(--radius); box-shadow: var(--shadow); }
 .time-range-btn { padding: 8px 16px; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; background: transparent; color: var(--gray); transition: all 0.2s; }
 .time-range-btn:hover { color: var(--dark); background: var(--gray-lighter); }

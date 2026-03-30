@@ -227,16 +227,20 @@ function Dashboard({ config, posts, botStatus, onToggleBot }: { config: Config; 
         <StatCard title="Frequenz" value={`${config.postFrequency}x/Woche`} icon="⏰" color="#10b981" />
       </div>
 
-      <div className="bot-control-panel">
+      <div className={`bot-control-panel ${botStatus ? '' : 'bot-inactive'}`}>
         <div className="bot-status-header">
-          <h2>Agent Steuerung</h2>
+          <h2>{botStatus ? '🟢 Agent aktiv' : '🔴 Agent deaktiviert'}</h2>
           <div className={`bot-toggle-button ${botStatus ? 'active' : ''}`} onClick={onToggleBot}>
             <div className="toggle-slider"></div>
             <span className="toggle-label">{botStatus ? 'AN' : 'AUS'}</span>
           </div>
         </div>
         <div className="bot-info">
-          <p>Der Agent generiert automatisch {config.postFrequency}x pro Woche Posts und hält immer 3 geplante Posts bereit. Veröffentlichung zwischen {config.publishWindow.start} und {config.publishWindow.end} Uhr.</p>
+          {botStatus ? (
+            <p>Der Agent generiert automatisch {config.postFrequency}x pro Woche Posts und hält immer 3 geplante Posts bereit. Veröffentlichung zwischen {config.publishWindow.start} und {config.publishWindow.end} Uhr.</p>
+          ) : (
+            <p>Der Agent ist pausiert. Es werden keine neuen Posts generiert und keine geplanten Posts automatisch veröffentlicht. Manuelles Posten über „Jetzt posten" ist weiterhin möglich.</p>
+          )}
         </div>
       </div>
 
@@ -270,7 +274,7 @@ function Dashboard({ config, posts, botStatus, onToggleBot }: { config: Config; 
 }
 
 // ============ CONTENT PLANNING (NEW) ============
-function ContentPlanning({ showToast, onReload }: { showToast: (msg: string, type: 'success' | 'error' | 'info') => void; onReload: () => void }) {
+function ContentPlanning({ showToast, onReload, botStatus, onToggleBot }: { showToast: (msg: string, type: 'success' | 'error' | 'info') => void; onReload: () => void; botStatus: boolean; onToggleBot: () => void }) {
   const [scheduledPosts, setScheduledPosts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [regenerating, setRegenerating] = useState<Record<string, boolean>>({});
@@ -433,6 +437,9 @@ function ContentPlanning({ showToast, onReload }: { showToast: (msg: string, typ
     Object.values(publishTimers.current).forEach(t => clearTimeout(t));
     publishTimers.current = {};
 
+    // Don't set timers if bot is deactivated
+    if (!botStatus) return;
+
     scheduledPosts.forEach(post => {
       if (!post.scheduled_at || post.status !== 'scheduled') return;
       const delay = new Date(post.scheduled_at).getTime() - Date.now();
@@ -451,7 +458,7 @@ function ContentPlanning({ showToast, onReload }: { showToast: (msg: string, typ
     return () => {
       Object.values(publishTimers.current).forEach(t => clearTimeout(t));
     };
-  }, [scheduledPosts]);
+  }, [scheduledPosts, botStatus]);
 
   const handleImageUpload = async (postId: string, file: File) => {
     // Validate file before uploading
@@ -559,6 +566,22 @@ function ContentPlanning({ showToast, onReload }: { showToast: (msg: string, typ
             <span className={loading ? 'spin' : ''}>🔄</span> Aktualisieren
           </button>
         </div>
+      </div>
+
+      {/* Bot Status Banner */}
+      <div className={`bot-control-panel ${botStatus ? '' : 'bot-inactive'}`}>
+        <div className="bot-status-header">
+          <h2>{botStatus ? '🟢 Agent aktiv' : '🔴 Agent deaktiviert'}</h2>
+          <div className={`bot-toggle-button ${botStatus ? 'active' : ''}`} onClick={onToggleBot}>
+            <div className="toggle-slider"></div>
+            <span className="toggle-label">{botStatus ? 'AN' : 'AUS'}</span>
+          </div>
+        </div>
+        {!botStatus && (
+          <div className="bot-info">
+            <p>Der Agent ist pausiert. Es werden keine neuen Posts automatisch generiert oder veröffentlicht.</p>
+          </div>
+        )}
       </div>
 
       {loading ? (
@@ -933,9 +956,31 @@ function Settings({ config, onSave }: { config: Config; onSave: (c: Config) => v
 }
 
 // ============ ANALYTICS ============
-function Analytics({ posts }: { posts: Post[] }) {
+function Analytics({ posts, showToast, onReload }: { posts: Post[]; showToast: (msg: string, type: 'success' | 'error' | 'info') => void; onReload: () => void }) {
   const [timeRange, setTimeRange] = useState<'7d' | '30d' | 'all'>('all');
+  const [trackingEngagement, setTrackingEngagement] = useState(false);
   const postedPosts = posts.filter(p => p.status === 'posted');
+
+  const triggerEngagement = async () => {
+    setTrackingEngagement(true);
+    try {
+      const res = await fetch(import.meta.env.VITE_WEBHOOK_ENGAGEMENT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ manual: true })
+      });
+      if (res.ok) {
+        showToast('Engagement-Daten werden aktualisiert...', 'success');
+        setTimeout(() => { onReload(); setTrackingEngagement(false); }, 5000);
+      } else {
+        showToast('Fehler beim Engagement-Tracking', 'error');
+        setTrackingEngagement(false);
+      }
+    } catch {
+      showToast('Verbindungsfehler', 'error');
+      setTrackingEngagement(false);
+    }
+  };
 
   const filteredPosts = useMemo(() => {
     if (timeRange === 'all') return postedPosts;
@@ -1004,10 +1049,15 @@ function Analytics({ posts }: { posts: Post[] }) {
     <div className="analytics">
       <div className="analytics-header">
         <h1>Analytics</h1>
-        <div className="time-range-buttons">
-          {([['7d', '7 Tage'], ['30d', '30 Tage'], ['all', 'Gesamt']] as const).map(([val, label]) => (
-            <button key={val} className={`time-range-btn ${timeRange === val ? 'active' : ''}`} onClick={() => setTimeRange(val)}>{label}</button>
-          ))}
+        <div className="analytics-header-actions">
+          <div className="time-range-buttons">
+            {([['7d', '7 Tage'], ['30d', '30 Tage'], ['all', 'Gesamt']] as const).map(([val, label]) => (
+              <button key={val} className={`time-range-btn ${timeRange === val ? 'active' : ''}`} onClick={() => setTimeRange(val)}>{label}</button>
+            ))}
+          </div>
+          <button className="action-button secondary" onClick={triggerEngagement} disabled={trackingEngagement}>
+            {trackingEngagement ? <><span className="spin">🔄</span> Lädt...</> : <><span>📊</span> Engagement aktualisieren</>}
+          </button>
         </div>
       </div>
       <div className="stats-grid">
@@ -1209,15 +1259,17 @@ export default function App() {
       <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} onLogout={handleLogout} />
       <div className="main-content">
         {isLoading && <div className="loading-overlay"><div className="spinner"></div></div>}
-        <div className="top-bar">
-          <button className="refresh-button" onClick={loadFromSupabase} disabled={isLoading}>
-            <span className={isLoading ? 'spin' : ''}>🔄</span> Aktualisieren
-          </button>
-        </div>
+        {activeTab !== 'planning' && activeTab !== 'analytics' && (
+          <div className="top-bar">
+            <button className="refresh-button" onClick={loadFromSupabase} disabled={isLoading}>
+              <span className={isLoading ? 'spin' : ''}>🔄</span> Aktualisieren
+            </button>
+          </div>
+        )}
         {activeTab === 'dashboard' && <Dashboard config={config} posts={posts} botStatus={botStatus} onToggleBot={handleToggleBot} />}
-        {activeTab === 'planning' && <ContentPlanning showToast={showToast} onReload={loadFromSupabase} />}
+        {activeTab === 'planning' && <ContentPlanning showToast={showToast} onReload={loadFromSupabase} botStatus={botStatus} onToggleBot={handleToggleBot} />}
         {activeTab === 'settings' && <Settings config={config} onSave={handleSaveSettings} />}
-        {activeTab === 'analytics' && <Analytics posts={posts} />}
+        {activeTab === 'analytics' && <Analytics posts={posts} showToast={showToast} onReload={loadFromSupabase} />}
       </div>
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </div>
