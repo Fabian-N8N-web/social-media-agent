@@ -132,7 +132,7 @@ function LoginScreen({ onLogin }: { onLogin: (u: string) => void }) {
 }
 
 // ============ SIDEBAR ============
-function Sidebar({ activeTab, setActiveTab, onLogout }: { activeTab: string; setActiveTab: (t: string) => void; onLogout: () => void }) {
+function Sidebar({ activeTab, setActiveTab, onLogout, darkMode, onToggleDark }: { activeTab: string; setActiveTab: (t: string) => void; onLogout: () => void; darkMode: boolean; onToggleDark: () => void }) {
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: '📊' },
     { id: 'planning', label: 'Content-Planung', icon: '📅' },
@@ -157,6 +157,10 @@ function Sidebar({ activeTab, setActiveTab, onLogout }: { activeTab: string; set
         ))}
       </nav>
       <div className="sidebar-footer">
+        <button className="dark-mode-button" onClick={onToggleDark}>
+          <span>{darkMode ? '☀️' : '🌙'}</span>
+          <span className="nav-label">{darkMode ? 'Hell' : 'Dunkel'}</span>
+        </button>
         <button className="logout-button" onClick={onLogout}><span>🚪</span> Abmelden</button>
       </div>
     </div>
@@ -1173,6 +1177,14 @@ export default function App() {
   const [toast, setToast] = useState<ToastData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [config, setConfig] = useState<Config>(DEFAULT_CONFIG);
+  const [darkMode, setDarkMode] = useState(() => {
+    return localStorage.getItem('darkMode') === 'true';
+  });
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', darkMode);
+    localStorage.setItem('darkMode', String(darkMode));
+  }, [darkMode]);
 
   const showToast = (message: string, type: 'success' | 'error' | 'info') => setToast({ message, type });
 
@@ -1256,7 +1268,7 @@ export default function App() {
 
   return (
     <div className="app">
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} onLogout={handleLogout} />
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} onLogout={handleLogout} darkMode={darkMode} onToggleDark={() => setDarkMode(!darkMode)} />
       <div className="main-content">
         {isLoading && <div className="loading-overlay"><div className="spinner"></div></div>}
         {activeTab !== 'planning' && activeTab !== 'analytics' && (
