@@ -3,13 +3,12 @@
 ## Projektübersicht
 Automatisierter Social Media Agent der KI-generierten Content (Text + Bild) plant, verwaltet und auf Facebook & Instagram veröffentlicht.
 
-- **Frontend:** React 18 + TypeScript + Vite (entwickelt in VS Code)
-- **Backend-Automation:** N8N Workflow
+- **Frontend:** React 18 + TypeScript + Vite
+- **Backend-Automation:** N8N Workflow (Self-Hosted auf Hostinger VPS)
 - **Datenbank & Storage:** Supabase (PostgreSQL + Blob Storage)
-- **KI Text:** Claude Sonnet (Anthropic API via N8N)
-- **KI Bild:** Flux 1.1 Pro (Replicate API via N8N)
+- **KI Text:** Claude Sonnet 4.5 (Anthropic API via N8N)
+- **KI Bild:** Flux 1.1 Pro (Replicate API via N8N) + Bria AI (Produktfotografie)
 - **Publishing:** Facebook Graph API v19.0 (Facebook + Instagram)
-- **Entwickelt mit:** Claude (claude.ai) für Planung/Architektur + Claude Code (VS Code Terminal) für Implementierung
 
 ---
 
@@ -17,13 +16,29 @@ Automatisierter Social Media Agent der KI-generierten Content (Text + Bild) plan
 
 ```
 /src
-  App.tsx              # Haupt-Frontend (1277 Zeilen) – alle UI-Komponenten
-  App.css              # Styling (536 Zeilen)
-  supabaseClient.ts    # Supabase Service Layer (alle DB/Storage Operationen)
-  env.d.ts             # TypeScript Typen für Umgebungsvariablen
+  App.tsx
+  App.css
+  supabaseClient.ts
+  env.d.ts
+  /types
+    index.ts              # Config, Post, Product, ProductImage, ToastData, PostEngagement
+  /constants
+    index.ts              # Webhooks, DEFAULT_CONFIG, CHART_COLORS, WEEKDAYS, IMAGE_MODES
+  /components
+    LoginScreen.tsx
+    Sidebar.tsx
+    StatCard.tsx
+    Dashboard.tsx
+    ContentPlanning.tsx
+    Settings.tsx
+    ProductManager.tsx    # Bild-Upload, Verarbeitung (Freistellen/Hintergrund), Modus-Auswahl
+    Analytics.tsx
+    Toast.tsx
+    WebhookStatus.tsx
+    PostPreviewModal.tsx
 /n8n
-  workflow.json        # N8N Workflow Export (hier ablegen nach Export)
-.env                   # Lokale Umgebungsvariablen (nie committen!)
+  workflow.json
+.env
 ```
 
 ---
@@ -32,12 +47,14 @@ Automatisierter Social Media Agent der KI-generierten Content (Text + Bild) plan
 
 ```env
 VITE_SUPABASE_URL=https://iosuxvmkcmgenesirlfb.supabase.co
-VITE_SUPABASE_ANON_KEY=<anon key – NICHT service_role key!>
+VITE_SUPABASE_ANON_KEY=<anon key>
 VITE_WEBHOOK_REGEN_TEXT=<n8n webhook url>/regenerate-text
 VITE_WEBHOOK_REGEN_IMAGE=<n8n webhook url>/regenerate-image
 VITE_WEBHOOK_TRIGGER_PLAN=<n8n webhook url>/trigger-planning
 VITE_WEBHOOK_PUBLISH_POST=<n8n webhook url>/publish-post
 VITE_WEBHOOK_ENGAGEMENT=<n8n webhook url>/trigger-engagement
+VITE_WEBHOOK_SCRAPE=<n8n webhook url>/scrape-website
+VITE_WEBHOOK_PROCESS_IMAGE=<n8n webhook url>/process-product-image
 ```
 
 ---
@@ -56,27 +73,60 @@ VITE_WEBHOOK_ENGAGEMENT=<n8n webhook url>/trigger-engagement
 | created_at | timestamptz | Erstellungsdatum |
 | engagement | jsonb | `{likes, comments, shares}` |
 | config_snapshot | jsonb | Einstellungen zum Zeitpunkt der Erstellung |
-| fb_post_id | text | Facebook Post ID nach Veröffentlichung |
-| ig_post_id | text | Instagram Post ID nach Veröffentlichung |
+| fb_post_id | text | Facebook Post ID |
+| ig_post_id | text | Instagram Post ID |
 | engagement_updated_at | timestamptz | Letztes Engagement-Update |
+| post_type | text | `spotlight` / `trend` / `knowledge` / `story` / `tip` |
+| product_id | uuid | Referenz auf products.id (nullable) |
 
 ### `config`
 | Spalte | Typ | Beschreibung |
 |--------|-----|--------------|
-| user_id | text | `admin` (aktuell fest) |
-| topic | text | Thema / Themenbeschreibung |
+| user_id | text | `admin` |
+| topic | text | Unternehmensbeschreibung |
+| brand_keywords | text | USPs, Werte, Besonderheiten |
+| website_url | text | URL der Unternehmenswebsite |
+| brand_context | text | Automatisch extrahierter Website-Text |
+| brand_context_updated_at | timestamptz | Letztes Scraping |
+| style_mode | text | `auto` / `manual` |
 | tonality | text | `professional` / `casual` / `humorous` / `inspirational` |
 | target_audience | text | `b2b` / `b2c` / `mixed` |
+| age_range | jsonb | `{min, max}` |
 | language | text | `de` / `en` |
 | emoji_usage | text | `none` / `minimal` / `moderate` / `extensive` |
-| hashtags | text[] | Array von Hashtags |
-| post_frequency | int | Posts pro Woche (1–14) |
-| publish_window | jsonb | `{start: "09:00", end: "18:00"}` |
-| content_mix | jsonb | `{tips, quotes, products, news}` in % |
-| image_prompt | text | Eigener Bildprompt (leer = automatisch) |
+| hashtags | text[] | Globale Hashtags |
+| text_length | int | 0–100 |
+| post_frequency | int | Anzahl Posts |
+| post_frequency_unit | text | `week` / `day` |
+| publish_window | jsonb | `{start, end}` |
 | image_style | text | `realistic` / `comic` / `art` / `fantasy` |
-| text_length | int | 0–100 (Slider) |
-| age_range | jsonb | `{min: 25, max: 55}` |
+| image_prompt | text | Eigener Bildprompt (leer = automatisch) |
+| enabled_post_types | text[] | Aktivierte Post-Typen |
+| style_overrides | jsonb | Pro Stil-Option `auto`/`manual` |
+| image_fallback_mode | text | Globaler Fallback-Modus (default: `ai_generated`) |
+
+### `products`
+| Spalte | Typ | Beschreibung |
+|--------|-----|--------------|
+| id | uuid | Primary Key |
+| user_id | text | `admin` |
+| name | text | Produktname |
+| description | text | Kurzbeschreibung für LLM-Kontext |
+| tags | text[] | Produkt-spezifische Hashtags |
+| image_mode | text | Standard-Bildmodus für dieses Produkt |
+| created_at | timestamptz | Erstellungsdatum |
+
+### `product_images`
+| Spalte | Typ | Beschreibung |
+|--------|-----|--------------|
+| id | uuid | Primary Key |
+| product_id | uuid | Referenz auf products.id (cascade delete) |
+| user_id | text | `admin` |
+| original_url | text | URL des originalen hochgeladenen Bildes |
+| processed_url | text | URL des verarbeiteten Bildes (nullable) |
+| mode | text | `original` / `removed_bg` / `replaced_bg` / `ai_generated` |
+| processing_status | text | `pending` / `processing` / `done` / `error` |
+| created_at | timestamptz | Erstellungsdatum |
 
 ### `bot_status`
 | Spalte | Typ | Beschreibung |
@@ -84,306 +134,166 @@ VITE_WEBHOOK_ENGAGEMENT=<n8n webhook url>/trigger-engagement
 | is_active | boolean | Bot ein/aus |
 | updated_at | timestamptz | Letztes Update |
 
-### Supabase Storage
-- **Bucket:** `social-media-images` (public)
-- Bilder werden von N8N und direkt vom Frontend hochgeladen
-- Dateiname-Schema: `post_{timestamp}_{random5chars}.png`
+### Supabase Storage Buckets
+- **`social-media-images`** (public) – generierte Post-Bilder
+- **`product-images`** (public, MIME: image/jpeg, image/png, image/webp) – Produktfotos
+
+### RLS Policies
+```sql
+ALTER TABLE product_images ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all for product_images" ON product_images FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public read product-images" ON storage.objects FOR SELECT USING (bucket_id = 'product-images');
+CREATE POLICY "Allow upload product-images" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'product-images');
+CREATE POLICY "Allow delete product-images" ON storage.objects FOR DELETE USING (bucket_id = 'product-images');
+```
+
+---
+
+## Bildmodi – Übersicht
+
+| Modus | Key | Beschreibung | API |
+|-------|-----|--------------|-----|
+| Original | `original` | Produktbild direkt verwenden | – |
+| Freigestellt | `removed_bg` | Hintergrund entfernt → transparentes PNG | `lucataco/remove-bg` |
+| KI-Hintergrund | `replaced_bg` | Freistellen + KI-Hintergrund + Schatten | `bria/generate-background` |
+| KI-generiert | `ai_generated` | Flux generiert frei aus Produktbeschreibung | `flux-1.1-pro` |
+
+**Logik im Content Planer (nur bei Spotlight):**
+1. Produkt hat Bilder mit `processing_status = done` → verwende `processed_url` gemäß `image_mode` (Fallback: `original_url`)
+2. Bildauswahl: Bevorzugt Bild mit `mode` = Produkt-`image_mode`, sonst erstes verfügbares
+3. Keine Bilder → Flux generiert frei aus Produktbeschreibung
+4. Nicht-Spotlight-Posts → immer Flux (kein Produktbild)
 
 ---
 
 ## N8N Workflow – Architektur
 
-### 4 Trigger-Pfade
+### Instanz & API
+- **URL:** `https://n8n.srv1274405.hstgr.cloud`
+- **Workflow-ID:** `-k-9TfqEfximpwRITU63T`
+- **API:** `PUT /api/v1/workflows/{id}` für Updates (UI-Import übernimmt Connections nicht zuverlässig)
 
-#### 1. Content Planer (stündlich + manuell via Webhook)
-```
-Trigger → Bot aktiv? → Credentials → Router (plan)
-→ Config laden (Supabase) → Config Parser
-→ Geplante Posts zählen → Prüfen & Planen (wie viele fehlen bis 3?)
-→ Text generieren (Claude Sonnet) → Flux Bild generieren (Replicate)
-→ Bild zu Supabase Storage hochladen → Post in DB speichern (status: scheduled)
-```
-- Hält immer **3 geplante Posts** in der Queue
-- Generiert nur fehlende Posts (z.B. nur 1 wenn bereits 2 vorhanden)
+### 7 Trigger-Pfade
+1. Content Planer (stündlich + manuell)
+2. Text regenerieren (`/regenerate-text`)
+3. Bild regenerieren (`/regenerate-image`)
+4. Auto Publisher (`/publish-post`)
+5. Engagement Tracker (`/trigger-engagement`)
+6. Website Scraper (`/scrape-website`)
+7. Produktbild verarbeiten (`/process-product-image`)
 
-#### 2. Text regenerieren (Webhook: `/regenerate-text`)
+### Datenfluss Content Planer
 ```
-Webhook → Tag regen_text → Credentials → Router
-→ Post laden → Config Parser (aus config_snapshot des Posts)
-→ Prompt bauen → Claude Sonnet → Supabase PATCH (content)
-→ Response ans Frontend
+Config Parser (Plan) → Geplante Posts zaehlen ──┐
+Config Parser (Plan) → Produkte laden ───────────┤→ Merge Posts+Produkte ──┐
+                                                 │                         ├→ Merge Alle Daten → Pruefen und Planen
+Config Parser (Plan) → Produktbilder laden (alle) ─────────────────────────┘
 ```
+- **Code-Node Sandbox:** `fetch()`, `require()` NICHT verfügbar – Daten müssen über Merge-Nodes fließen
+- **Item-Trennung in Pruefen und Planen:** `$input.all()` wird nach Feldern gefiltert (Produkte: `name`, Bilder: `product_id`, Posts: `scheduled_at`)
+- **Produkte nur für Spotlight:** Nur Post-Typ `spotlight` bekommt ein Produkt + Produktbild zugewiesen
+- **1 Post pro Trigger:** Es wird immer genau 1 Post generiert (max. 3 in Queue)
 
-#### 3. Bild regenerieren (Webhook: `/regenerate-image`)
+### Webhook `/process-product-image`
 ```
-Webhook → Tag regen_img → Credentials → Router
-→ Post laden → Image Prompt bauen
-→ Flux 1.1 Pro → Bild laden → Supabase Storage Upload
-→ URL generieren → Supabase PATCH (image_url) → Response ans Frontend
-```
-
-#### 4. Auto Publisher (stündlich + manuell via Webhook `/publish-post`)
-```
-Trigger → Bot aktiv? → Credentials → Router (publish / publish_single)
-→ Fällige Posts laden (scheduled_at <= jetzt)
-→ Facebook posten (Graph API /photos)
-→ Instagram: Create Media → Publish
-→ Supabase PATCH (status: posted, fb_post_id, ig_post_id)
+Payload: { productImageId, mode, backgroundPrompt? }
+→ Router nach mode: original / removed_bg / replaced_bg / ai_generated
+→ Supabase PATCH: processed_url + processing_status = 'done'
+→ Response: { success, processed_url }
 ```
 
-#### 5. Engagement Tracker (alle 2h + Webhook `/trigger-engagement`)
+**Für mode `ai_generated` (NEU im N8N-Workflow ergänzen):**
 ```
-Trigger → Credentials → Gepostete Posts laden
-→ FB Engagement abfragen (likes, comments, shares)
-→ IG Engagement abfragen → mergen
-→ Supabase PATCH (engagement, engagement_updated_at)
+→ Produkt-Daten laden (name, description, brand_keywords aus config)
+→ Prompt bauen:
+  "Professional product photography of [product.name].
+   [product.description]. [brand_keywords].
+   Clean commercial style, high quality, [image_style from config]."
+→ Flux 1.1 Pro generieren
+→ Supabase Storage Upload (product-images bucket)
+→ Supabase PATCH: processed_url, processing_status = 'done'
+   (original_url = processed_url da kein Upload, nur URL setzen)
 ```
 
-### Wichtige N8N Node-Namen (für Referenzen im Workflow)
-- `Credentials` – enthält alle API-Keys (⚠️ aktuell hardcoded)
-- `Router` – Switch-Node der nach `action` routet
-- `Config Parser (Plan/Text/Bild)` – normalisiert Supabase Config-Antwort
-- `Pruefen und Planen` – Kernlogik: berechnet fehlende Posts + Zeitplanung
+### Replicate API – Wichtige Hinweise
+- `lucataco/remove-bg` → `/v1/predictions` mit `version` (NICHT `/v1/models/...`)
+- `bria/generate-background` → `/v1/models/bria/.../predictions`
+- `flux-1.1-pro` → `/v1/models/black-forest-labs/flux-1.1-pro/predictions`
+- Rate-Limit bei < $5 Guthaben → Waits nötig (20s Code-Nodes bereits eingebaut)
+
+### Webhook-Tabelle
+
+| Aktion | Payload | Response |
+|--------|---------|----------|
+| Post generieren (1 Stück) | `{manual: true}` | HTTP 200 |
+| Text neu | `{postId}` | `{success, content}` |
+| Bild neu | `{postId}` | `{success, imageUrl}` |
+| Sofort posten | `{postId}` | HTTP 200 |
+| Engagement | `{manual: true}` | HTTP 200 |
+| Website scrapen | `{url, userId}` | `{success, brand_context}` |
+| Produktbild verarbeiten | `{productImageId, mode, backgroundPrompt?}` | `{success, processed_url}` |
 
 ---
 
-## Frontend-Komponenten
+## Aktueller Stand (Stand: April 2026)
 
-### `App.tsx` – Komponenten-Übersicht
+### ✅ Fertig
+- Frontend komplett (Login, Dashboard, Content-Planung, Settings, Analytics)
+- Supabase Auth Login + Registrierung
+- Dark Mode
+- Refactoring App.tsx → 11 Komponenten-Dateien
+- Webhook-Status-Anzeige
+- Kalender-View interaktiv
+- Post-Vorschau Mockup (Facebook + Instagram)
+- Kachel-Paginierung
+- Settings Redesign (3 Tabs)
+- Knowledge Base (Website-URL Scraping)
+- Produkt-Portfolio (CRUD) mit "Nächster"-Badge (wie Content-Varianten)
+- Content-Varianten (5 Post-Typen, Rotation)
+- Individuelle Stiloptionen (styleOverrides)
+- N8N: 7 Pfade inkl. Scraper + Produktbild-Verarbeitung
+- N8N: Post-Typ-Rotation + Produkt-Rotation (nur Spotlight) + erweiterter Prompt
+- N8N: Merge-Nodes für zuverlässigen Datenfluss (Posts + Produkte + Bilder)
+- N8N: Multi-Item-Processing korrekt (Index-Matching in Text/Bild parsen)
+- N8N: Workflow-Updates via REST API (UI-Import unzuverlässig für Connections)
+- Kontextbezogene Bildgenerierung
+- Produktbilder: Upload, Verarbeitung (Freistellen + Hintergrund), Modus-Auswahl
+- Produktbild-Auswahl nach `image_mode` + `processed_url` Fallback
+- Bria AI Integration
+- Abbrechen-Button für Upload/Verarbeitung im ProductManager
+- Aufklapp-Schaltfläche mit Text statt Pfeil
+- Speichern-Buttons einheitlich benannt ("Einstellungen speichern")
+- Bildmodus-Kennzeichnung pro Bild (Badge immer sichtbar)
+- Fallback-Sektion vereinfacht (nur Info-Text)
+- KI-Bild direkt im ProductManager generierbar
+- Content-Planung: 1 Post pro Klick (statt 3), einzelne Kachel-Generierung mit Spinner
+- Content-Planung: Globale Sperre bei Text/Bild-Regenerierung (Replicate Rate-Limit)
+- Content-Planung: Leere Kacheln zeigen Lock-State während Generierung
+- Produkt-Bearbeitungsformular über der Liste (statt darunter)
 
-| Komponente | Funktion |
-|-----------|----------|
-| `LoginScreen` | Einfaches Login (⚠️ Passwörter hardcoded – TODO: Supabase Auth) |
-| `Sidebar` | Navigation: Dashboard / Content-Planung / Einstellungen / Analytics |
-| `Dashboard` | Statistiken, Bot-Toggle, letzte 6 Posts mit Engagement |
-| `ContentPlanning` | 3 Post-Kacheln: Vorschau, Edit, Neu generieren, Sofort posten |
-| `Settings` | Alle Config-Felder → schreibt direkt in Supabase |
-| `Analytics` | Charts: Engagement über Zeit, Plattform, Wochentag, Top 5 Posts |
-| `Toast` | Benachrichtigungen (success/error/info) |
+### 📋 Geplant
+- A/B Testing
 
-### `supabaseClient.ts` – SupabaseService Methoden
-```ts
-getPosts()                    // alle Posts
-getPostedPosts()              // status = posted
-getScheduledPosts()           // status = scheduled, sortiert nach scheduled_at
-createPost(post)
-updatePost(postId, updates)
-deletePost(postId)
-getConfig(userId?)            // default: 'admin'
-updateConfig(config, userId?) // upsert
-getBotStatus()
-updateBotStatus(isActive)     // upsert
-uploadImage(file)             // → Supabase Storage, gibt public URL zurück
-```
+### 💡 Vor Verkauf umsetzen: Multi-Tenancy
+Jeder Kunde bekommt eine eigene N8N-Instanz. Damit das Frontend die richtige Instanz anspricht:
+1. Neue Spalte `webhook_base_url` in `config`-Tabelle (z.B. `https://n8n-kunde1.example.com/webhook`)
+2. Frontend liest Base-URL dynamisch aus Config statt aus `VITE_`-Env-Variablen
+3. Alle Webhook-Calls nutzen `config.webhookBaseUrl + '/trigger-planning'` etc.
+4. Ein einziges Frontend-Build für alle Kunden, RLS via `user_id` trennt die Daten
 
 ---
 
-## Webhook-Kommunikation Frontend ↔ N8N
-
-| Aktion | Webhook | Payload | Response |
-|--------|---------|---------|----------|
-| Posts generieren | `TRIGGER_PLAN` | `{manual: true}` | HTTP 200 |
-| Text neu | `REGEN_TEXT` | `{postId}` | `{success, content}` |
-| Bild neu | `REGEN_IMAGE` | `{postId}` | `{success, imageUrl}` |
-| Sofort posten | `PUBLISH_POST` | `{postId}` | HTTP 200 |
-| Engagement update | `ENGAGEMENT` | `{manual: true}` | HTTP 200 |
-
----
-
-## Bekannte Schwachstellen / TODOs
-
-### ⚠️ Sicherheit (Priorität: HOCH)
-1. **Login hardcoded** – `admin/admin123` steht im Frontend-Code sichtbar
-   - TODO: Auf Supabase Auth (`supabase.auth.signInWithPassword`) umstellen
-2. **N8N Credentials hardcoded** – Facebook Token, Supabase Service Key, Replicate Token stehen im `Credentials`-Node als JavaScript-String
-   - TODO: N8N Credential-Manager verwenden (Settings → Credentials)
-   - ODER: N8N Umgebungsvariablen (`$env.FB_ACCESS_TOKEN`)
-
-### 🐛 Bugs / Code-Qualität
-3. **`updateBotStatus` ohne await** in `App.tsx` → Fehler werden geschluckt
-   ```ts
-   // Zeile ~1200 in App.tsx – so:
-   SupabaseService.updateBotStatus(newStatus);
-   // Besser:
-   await SupabaseService.updateBotStatus(newStatus);
-   ```
-4. **Auto-Publish-Timer im Frontend** – `setTimeout` in `ContentPlanning` funktioniert nur wenn Tab offen ist. N8N `Auto Publisher 1h` ist der zuverlässige Fallback.
-
-### 🚀 Feature-Ideen
-- [ ] Supabase Auth Login
-- [ ] Mehrere Benutzer / Mandanten
-- [ ] Post-Vorschau als Social-Media-Mockup
-- [ ] A/B Testing: zwei Textvarianten generieren lassen
-- [ ] Geplante Posts im Kalender-View
-- [ ] Webhook-Status anzeigen (ist N8N erreichbar?)
-- [x] Dark Mode ← aktuell in Umsetzung
+## Bekannte Schwachstellen
+1. ~~Login hardcoded~~ → Supabase Auth
+2. N8N Credentials hardcoded – workflow.json in .gitignore
+3. ~~Flux NSFW-Filter~~ → Bildprompt basiert auf Post-Text + brand_keywords
+4. Replicate Rate-Limit bei < $5 Guthaben – Waits im Workflow nötig
 
 ---
 
 ## Entwicklungs-Workflow
-
-### Lokale Entwicklung
 ```bash
-npm run dev        # Vite Dev-Server starten
-npm run build      # Production Build
-npm run preview    # Build lokal testen
+npm run dev
+npm run build
+npm run preview
 ```
-
-### Änderungen deployen
-1. Code in VS Code bearbeiten (Claude Code im Terminal)
-2. `git add . && git commit -m "..."` 
-3. Push zu GitHub → automatisches Deploy (falls Vercel/Netlify verbunden)
-
-### N8N Workflow ändern
-1. In N8N UI bearbeiten
-2. Workflow exportieren: Workflow → ⋯ → Export as JSON
-3. JSON nach `/n8n/workflow.json` speichern und committen
-
-### Kontext für neue Claude Code Sessions
-Wenn du Claude Code in VS Code startest, liest es diese Datei automatisch.
-Für komplexe Änderungen: erst hier in claude.ai besprechen, dann in VS Code umsetzen.
-
----
-
-## Aktueller Stand (Stand: März 2026)
-
-### ✅ Fertig
-- Frontend komplett (Login, Dashboard, Content-Planung, Settings, Analytics)
-- N8N Workflow mit allen 5 Pfaden funktionsfähig
-- Supabase Tabellen und Storage eingerichtet
-- Facebook + Instagram Publishing via Graph API
-- Engagement Tracking automatisiert
-- Bild-Upload vom Frontend (eigene Bilder)
-- Dark Mode mit localStorage-Persistenz
-
-### 🔄 In Arbeit
-- Sicherheits-Verbesserungen (Login, API-Keys)
-
-### 📋 Geplant
-- Siehe Feature-Ideen oben
-
----
-
-## 🎯 Aktuelle Aufgabe für Claude Code: Dark Mode
-
-### Ziel
-Einen Dark Mode Toggle in die App einbauen. Der Modus soll persistent sein (localStorage) und smooth zwischen hell und dunkel wechseln.
-
-### Umsetzung – Schritt für Schritt
-
-#### 1. `App.tsx` – Dark Mode State im App-Root
-```tsx
-// Neuer State in der App-Komponente:
-const [darkMode, setDarkMode] = useState(() => {
-  return localStorage.getItem('darkMode') === 'true';
-});
-
-// useEffect um class auf <html> zu setzen:
-useEffect(() => {
-  document.documentElement.classList.toggle('dark', darkMode);
-  localStorage.setItem('darkMode', String(darkMode));
-}, [darkMode]);
-
-// darkMode + setDarkMode als Props an Sidebar weitergeben
-```
-
-#### 2. `App.tsx` – Sidebar Props erweitern
-```tsx
-// Sidebar Props Interface erweitern:
-function Sidebar({ activeTab, setActiveTab, onLogout, darkMode, onToggleDark }: {
-  activeTab: string;
-  setActiveTab: (t: string) => void;
-  onLogout: () => void;
-  darkMode: boolean;
-  onToggleDark: () => void;
-})
-
-// Toggle-Button in der Sidebar, direkt über dem Logout-Button:
-<button className="dark-mode-button" onClick={onToggleDark}>
-  <span>{darkMode ? '☀️' : '🌙'}</span>
-  <span className="nav-label">{darkMode ? 'Hell' : 'Dunkel'}</span>
-</button>
-```
-
-#### 3. `App.css` – CSS-Variablen + Dark Mode Styles
-Alle hardcodierten Farben auf CSS-Variablen umstellen und Dark Mode Overrides hinzufügen:
-
-```css
-/* === LIGHT MODE (Standard) === */
-:root {
-  --bg-primary: #ffffff;
-  --bg-secondary: #f8fafc;
-  --bg-tertiary: #f1f5f9;
-  --text-primary: #1e293b;
-  --text-secondary: #64748b;
-  --text-muted: #94a3b8;
-  --border-color: #e2e8f0;
-  --sidebar-bg: #1e293b;
-  --sidebar-text: #94a3b8;
-  --sidebar-active: #6366f1;
-  --card-bg: #ffffff;
-  --card-shadow: 0 1px 3px rgba(0,0,0,0.1);
-  --input-bg: #ffffff;
-  --input-border: #e2e8f0;
-}
-
-/* === DARK MODE === */
-html.dark {
-  --bg-primary: #0f172a;
-  --bg-secondary: #1e293b;
-  --bg-tertiary: #334155;
-  --text-primary: #f1f5f9;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
-  --border-color: #334155;
-  --sidebar-bg: #020617;
-  --sidebar-text: #64748b;
-  --sidebar-active: #818cf8;
-  --card-bg: #1e293b;
-  --card-shadow: 0 1px 3px rgba(0,0,0,0.4);
-  --input-bg: #334155;
-  --input-border: #475569;
-}
-
-/* Transition für smooth Wechsel */
-*, *::before, *::after {
-  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
-}
-```
-
-Dann alle bestehenden Farbwerte in App.css auf die Variablen umstellen, z.B.:
-- `background: #ffffff` → `background: var(--bg-primary)`
-- `color: #1e293b` → `color: var(--text-primary)`
-- `border-color: #e2e8f0` → `border-color: var(--border-color)`
-- `.sidebar` background → `var(--sidebar-bg)`
-- `.post-card`, `.stat-card`, `.planning-card` → `var(--card-bg)`
-- Inputs und Textareas → `var(--input-bg)`, `var(--input-border)`
-
-#### 4. Dark Mode Button Style in App.css
-```css
-.dark-mode-button {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  padding: 10px 16px;
-  background: transparent;
-  border: none;
-  color: var(--sidebar-text);
-  cursor: pointer;
-  border-radius: 8px;
-  margin-bottom: 8px;
-  font-size: 14px;
-  transition: background 0.2s, color 0.2s;
-}
-.dark-mode-button:hover {
-  background: rgba(255,255,255,0.08);
-  color: #ffffff;
-}
-```
-
-### Wichtige Hinweise
-- Die Sidebar hat bereits einen dunklen Hintergrund (`#1e293b`) – im Dark Mode wird sie noch dunkler (`#020617`)
-- Recharts Charts brauchen ggf. angepasste Farben für Achsen/Grid – `stroke="#94a3b8"` für Dark Mode
-- Das `.login-container` hat einen Gradient-Hintergrund – auch diesen auf Variablen umstellen
-- Nach der Umsetzung: Dark Mode in der CLAUDE.md unter "Fertig" verschieben

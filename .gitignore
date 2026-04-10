@@ -6,6 +6,10 @@ node_modules/
 .env.local
 .env.production
 
+# N8N Workflow (enthält API-Keys im Credentials-Node!)
+n8n/workflow.json
+n8n/update_payload.json
+
 # Build output
 dist/
 build/
