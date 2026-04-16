@@ -10,6 +10,7 @@ import ContentPlanning from './components/ContentPlanning';
 import Settings        from './components/Settings';
 import Analytics       from './components/Analytics';
 import Toast           from './components/Toast';
+import OnboardingWizard from './components/OnboardingWizard';
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -69,8 +70,13 @@ export default function App() {
           brandKeywords: loadedConfig.brand_keywords || '',
           styleMode: loadedConfig.style_mode || 'auto',
           postFrequencyUnit: loadedConfig.post_frequency_unit || 'week',
-          enabledPostTypes: loadedConfig.enabled_post_types || ['spotlight', 'trend', 'knowledge', 'story', 'tip'],
+          enabledPostTypes: loadedConfig.enabled_post_types || ['trend', 'knowledge', 'story', 'tip', 'spotlight'],
           imageFallbackMode: loadedConfig.image_fallback_mode || 'ai_generated',
+          setupCompleted: loadedConfig.setup_completed ?? false,
+          publishPlatform: loadedConfig.publish_platform || 'both',
+          businessType: loadedConfig.business_type || 'products',
+          industry: loadedConfig.industry || '',
+          imageModels: loadedConfig.image_models || { people: 'google/imagen-4', scene: 'black-forest-labs/flux-1.1-pro-ultra' },
           styleOverrides: loadedConfig.style_overrides || { tonality: 'auto', targetAudience: 'auto', ageRange: 'auto', language: 'auto', emojiUsage: 'auto', hashtags: 'auto' }
         });
       }
@@ -147,6 +153,11 @@ export default function App() {
         post_frequency_unit: newConfig.postFrequencyUnit,
         enabled_post_types: newConfig.enabledPostTypes,
         image_fallback_mode: newConfig.imageFallbackMode,
+        setup_completed: newConfig.setupCompleted,
+        publish_platform: newConfig.publishPlatform,
+        business_type: newConfig.businessType,
+        industry: newConfig.industry,
+        image_models: newConfig.imageModels,
         style_overrides: newConfig.styleOverrides
       });
       showToast('Einstellungen gespeichert!', 'success');
@@ -154,17 +165,47 @@ export default function App() {
     setIsLoading(false);
   };
 
+  const handleWizardComplete = async () => {
+    // Config neu laden, damit setupCompleted = true übernommen wird
+    await loadFromSupabase();
+  };
+
+  const handleRestartWizard = async () => {
+    const updated = { ...config, setupCompleted: false };
+    setConfig(updated);
+    try {
+      await SupabaseService.updateConfig({ setup_completed: false });
+      showToast('Setup wird neu gestartet …', 'info');
+    } catch {
+      showToast('Fehler beim Setup-Neustart', 'error');
+    }
+  };
+
   // Show nothing while checking session to avoid login flash
   if (!authChecked) return null;
 
   if (!isLoggedIn) return <LoginScreen onLogin={handleLogin} />;
+
+  // Onboarding-Wizard blockierend anzeigen, solange Setup nicht abgeschlossen
+  if (!config.setupCompleted) {
+    return (
+      <>
+        <OnboardingWizard
+          config={config}
+          onComplete={handleWizardComplete}
+          showToast={showToast}
+        />
+        {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+      </>
+    );
+  }
 
   return (
     <div className="app">
       <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} onLogout={handleLogout} darkMode={darkMode} onToggleDark={() => setDarkMode(d => !d)} />
       <div className="main-content">
         {isLoading && <div className="loading-overlay"><div className="spinner"></div></div>}
-        {activeTab !== 'planning' && activeTab !== 'analytics' && (
+        {activeTab !== 'planning' && activeTab !== 'analytics' && activeTab !== 'settings' && (
           <div className="top-bar">
             <button className="refresh-button" onClick={loadFromSupabase} disabled={isLoading}>
               <span className={isLoading ? 'spin' : ''}>🔄</span> Aktualisieren
@@ -173,7 +214,7 @@ export default function App() {
         )}
         {activeTab === 'dashboard' && <Dashboard config={config} posts={posts} botStatus={botStatus} onToggleBot={handleToggleBot} />}
         {activeTab === 'planning' && <ContentPlanning showToast={showToast} onReload={loadFromSupabase} botStatus={botStatus} onToggleBot={handleToggleBot} generating={generating} setGenerating={setGenerating} />}
-        {activeTab === 'settings' && <Settings config={config} onSave={handleSaveSettings} showToast={showToast} />}
+        {activeTab === 'settings' && <Settings config={config} onSave={handleSaveSettings} showToast={showToast} onRestartWizard={handleRestartWizard} onReloadConfig={loadFromSupabase} posts={posts} />}
         {activeTab === 'analytics' && <Analytics posts={posts} showToast={showToast} onReload={loadFromSupabase} />}
       </div>
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}

@@ -7,7 +7,11 @@ Automatisierter Social Media Agent der KI-generierten Content (Text + Bild) plan
 - **Backend-Automation:** N8N Workflow (Self-Hosted auf Hostinger VPS)
 - **Datenbank & Storage:** Supabase (PostgreSQL + Blob Storage)
 - **KI Text:** Claude Sonnet 4.5 (Anthropic API via N8N)
-- **KI Bild:** Flux 1.1 Pro (Replicate API via N8N) + Bria AI (Produktfotografie)
+- **KI Bild:** Dual-Model-Routing auf Replicate – Auto-Wahl nach `scene_type`:
+  - `people` → Google Imagen 4 (Default)
+  - `scene` → Flux 1.1 Pro Ultra mit `raw: true` (Default)
+  - Alternative Modelle: Ideogram v3 Turbo, Flux 1.1 Pro klassisch
+  - + Bria AI (Produktfotografie-Hintergrund) + Flux 1.1 Pro (img2img)
 - **Publishing:** Facebook Graph API v19.0 (Facebook + Instagram)
 
 ---
@@ -21,7 +25,7 @@ Automatisierter Social Media Agent der KI-generierten Content (Text + Bild) plan
   supabaseClient.ts
   env.d.ts
   /types
-    index.ts              # Config, Post, Product, ProductImage, ToastData, PostEngagement
+    index.ts              # Config, Post, Product, ProductImage, ToastData, PostEngagement, BusinessType
   /constants
     index.ts              # Webhooks, DEFAULT_CONFIG, CHART_COLORS, WEEKDAYS, IMAGE_MODES
   /components
@@ -30,14 +34,18 @@ Automatisierter Social Media Agent der KI-generierten Content (Text + Bild) plan
     StatCard.tsx
     Dashboard.tsx
     ContentPlanning.tsx
-    Settings.tsx
-    ProductManager.tsx    # Bild-Upload, Verarbeitung (Freistellen/Hintergrund), Modus-Auswahl
+    Settings.tsx           # 3 Tabs: business / content / schedule; Toolbar (Refresh/Save/Restart-Wizard)
+    ProductManager.tsx     # Bild-Upload, Verarbeitung (Freistellen/Hintergrund), Modus-Auswahl, adaptive Labels
+    OnboardingWizard.tsx   # 4-Schritt Wizard: Unternehmen → Website → Produkt → Content-Varianten
     Analytics.tsx
     Toast.tsx
     WebhookStatus.tsx
-    PostPreviewModal.tsx
+    PostPreviewModal.tsx   # Nur Facebook-Mockup (Instagram entfernt)
 /n8n
   workflow.json
+  add_style_path.mjs
+  patch_industry_context.mjs
+  setup.sql
 .env
 ```
 
@@ -55,6 +63,7 @@ VITE_WEBHOOK_PUBLISH_POST=<n8n webhook url>/publish-post
 VITE_WEBHOOK_ENGAGEMENT=<n8n webhook url>/trigger-engagement
 VITE_WEBHOOK_SCRAPE=<n8n webhook url>/scrape-website
 VITE_WEBHOOK_PROCESS_IMAGE=<n8n webhook url>/process-product-image
+VITE_WEBHOOK_GENERATE_STYLE=<n8n webhook url>/generate-style-suggestions
 ```
 
 ---
@@ -66,17 +75,18 @@ VITE_WEBHOOK_PROCESS_IMAGE=<n8n webhook url>/process-product-image
 |--------|-----|--------------|
 | id | uuid | Primary Key |
 | content | text | Post-Text |
+| image_concept | text | Claudes Bildbeschreibung (für Anti-Wiederholungs-Kontext) |
 | status | text | `scheduled` / `posted` |
 | platform | text | `Facebook & Instagram` |
 | image_url | text | Public URL aus Supabase Storage |
 | scheduled_at | timestamptz | Geplanter Veröffentlichungszeitpunkt |
 | created_at | timestamptz | Erstellungsdatum |
 | engagement | jsonb | `{likes, comments, shares}` |
-| config_snapshot | jsonb | Einstellungen zum Zeitpunkt der Erstellung |
+| config_snapshot | jsonb | Einstellungen zum Zeitpunkt der Erstellung (inkl. `scene_type`) |
 | fb_post_id | text | Facebook Post ID |
 | ig_post_id | text | Instagram Post ID |
 | engagement_updated_at | timestamptz | Letztes Engagement-Update |
-| post_type | text | `spotlight` / `trend` / `knowledge` / `story` / `tip` |
+| post_type | text | `trend` / `knowledge` / `story` / `tip` / `spotlight` |
 | product_id | uuid | Referenz auf products.id (nullable) |
 
 ### `config`
@@ -84,6 +94,8 @@ VITE_WEBHOOK_PROCESS_IMAGE=<n8n webhook url>/process-product-image
 |--------|-----|--------------|
 | user_id | text | `admin` |
 | topic | text | Unternehmensbeschreibung |
+| business_type | text | `products` / `services` / `mixed` |
+| industry | text | Freitext Branche |
 | brand_keywords | text | USPs, Werte, Besonderheiten |
 | website_url | text | URL der Unternehmenswebsite |
 | brand_context | text | Automatisch extrahierter Website-Text |
@@ -99,11 +111,14 @@ VITE_WEBHOOK_PROCESS_IMAGE=<n8n webhook url>/process-product-image
 | post_frequency | int | Anzahl Posts |
 | post_frequency_unit | text | `week` / `day` |
 | publish_window | jsonb | `{start, end}` |
+| publish_platform | text | `both` / `facebook` / `instagram` |
 | image_style | text | `realistic` / `comic` / `art` / `fantasy` |
 | image_prompt | text | Eigener Bildprompt (leer = automatisch) |
 | enabled_post_types | text[] | Aktivierte Post-Typen |
 | style_overrides | jsonb | Pro Stil-Option `auto`/`manual` |
 | image_fallback_mode | text | Globaler Fallback-Modus (default: `ai_generated`) |
+| setup_completed | boolean | Onboarding-Wizard abgeschlossen |
+| image_models | jsonb | `{"people": "<slug>", "scene": "<slug>"}` |
 
 ### `products`
 | Spalte | Typ | Beschreibung |
@@ -113,7 +128,8 @@ VITE_WEBHOOK_PROCESS_IMAGE=<n8n webhook url>/process-product-image
 | name | text | Produktname |
 | description | text | Kurzbeschreibung für LLM-Kontext |
 | tags | text[] | Produkt-spezifische Hashtags |
-| image_mode | text | Standard-Bildmodus für dieses Produkt |
+| image_mode | text | Standard-Bildmodus |
+| entry_type | text | `product` / `service` / NULL |
 | created_at | timestamptz | Erstellungsdatum |
 
 ### `product_images`
@@ -122,7 +138,7 @@ VITE_WEBHOOK_PROCESS_IMAGE=<n8n webhook url>/process-product-image
 | id | uuid | Primary Key |
 | product_id | uuid | Referenz auf products.id (cascade delete) |
 | user_id | text | `admin` |
-| original_url | text | URL des originalen hochgeladenen Bildes |
+| original_url | text | URL des originalen Bildes |
 | processed_url | text | URL des verarbeiteten Bildes (nullable) |
 | mode | text | `original` / `removed_bg` / `replaced_bg` / `ai_generated` |
 | processing_status | text | `pending` / `processing` / `done` / `error` |
@@ -134,36 +150,6 @@ VITE_WEBHOOK_PROCESS_IMAGE=<n8n webhook url>/process-product-image
 | is_active | boolean | Bot ein/aus |
 | updated_at | timestamptz | Letztes Update |
 
-### Supabase Storage Buckets
-- **`social-media-images`** (public) – generierte Post-Bilder
-- **`product-images`** (public, MIME: image/jpeg, image/png, image/webp) – Produktfotos
-
-### RLS Policies
-```sql
-ALTER TABLE product_images ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Allow all for product_images" ON product_images FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public read product-images" ON storage.objects FOR SELECT USING (bucket_id = 'product-images');
-CREATE POLICY "Allow upload product-images" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'product-images');
-CREATE POLICY "Allow delete product-images" ON storage.objects FOR DELETE USING (bucket_id = 'product-images');
-```
-
----
-
-## Bildmodi – Übersicht
-
-| Modus | Key | Beschreibung | API |
-|-------|-----|--------------|-----|
-| Original | `original` | Produktbild direkt verwenden | – |
-| Freigestellt | `removed_bg` | Hintergrund entfernt → transparentes PNG | `lucataco/remove-bg` |
-| KI-Hintergrund | `replaced_bg` | Freistellen + KI-Hintergrund + Schatten | `bria/generate-background` |
-| KI-generiert | `ai_generated` | Flux generiert frei aus Produktbeschreibung | `flux-1.1-pro` |
-
-**Logik im Content Planer (nur bei Spotlight):**
-1. Produkt hat Bilder mit `processing_status = done` → verwende `processed_url` gemäß `image_mode` (Fallback: `original_url`)
-2. Bildauswahl: Bevorzugt Bild mit `mode` = Produkt-`image_mode`, sonst erstes verfügbares
-3. Keine Bilder → Flux generiert frei aus Produktbeschreibung
-4. Nicht-Spotlight-Posts → immer Flux (kein Produktbild)
-
 ---
 
 ## N8N Workflow – Architektur
@@ -171,9 +157,9 @@ CREATE POLICY "Allow delete product-images" ON storage.objects FOR DELETE USING 
 ### Instanz & API
 - **URL:** `https://n8n.srv1274405.hstgr.cloud`
 - **Workflow-ID:** `-k-9TfqEfximpwRITU63T`
-- **API:** `PUT /api/v1/workflows/{id}` für Updates (UI-Import übernimmt Connections nicht zuverlässig)
+- **API:** `PUT /api/v1/workflows/{id}` für Updates
 
-### 7 Trigger-Pfade
+### 8 Trigger-Pfade
 1. Content Planer (stündlich + manuell)
 2. Text regenerieren (`/regenerate-text`)
 3. Bild regenerieren (`/regenerate-image`)
@@ -181,113 +167,156 @@ CREATE POLICY "Allow delete product-images" ON storage.objects FOR DELETE USING 
 5. Engagement Tracker (`/trigger-engagement`)
 6. Website Scraper (`/scrape-website`)
 7. Produktbild verarbeiten (`/process-product-image`)
+8. Style-Vorschläge generieren (`/generate-style-suggestions`)
 
-### Datenfluss Content Planer
-```
-Config Parser (Plan) → Geplante Posts zaehlen ──┐
-Config Parser (Plan) → Produkte laden ───────────┤→ Merge Posts+Produkte ──┐
-                                                 │                         ├→ Merge Alle Daten → Pruefen und Planen
-Config Parser (Plan) → Produktbilder laden (alle) ─────────────────────────┘
-```
-- **Code-Node Sandbox:** `fetch()`, `require()` NICHT verfügbar – Daten müssen über Merge-Nodes fließen
-- **Item-Trennung in Pruefen und Planen:** `$input.all()` wird nach Feldern gefiltert (Produkte: `name`, Bilder: `product_id`, Posts: `scheduled_at`)
-- **Produkte nur für Spotlight:** Nur Post-Typ `spotlight` bekommt ein Produkt + Produktbild zugewiesen
-- **1 Post pro Trigger:** Es wird immer genau 1 Post generiert (max. 3 in Queue)
+---
 
-### Webhook `/process-product-image`
+## Content-Generierung – Detaillierter Ablauf
+
+### Schritt 1: Post-Typ & Timing bestimmen (`Pruefen und Planen`)
+
+**Rotationsreihenfolge:** `['trend', 'knowledge', 'story', 'tip', 'spotlight']` – Spotlight kommt bewusst zuletzt, damit neue Nutzer Zeit haben Produkte einzupflegen.
+
+**Rotationslogik:**
+1. Letzter Typ aus **scheduled** Posts (nach `scheduled_at` sortiert)
+2. Fallback wenn Queue leer: letzter **geposteter** Post (nach `created_at` sortiert)
+3. Wenn gar keine Posts existieren → Index 0 (`trend`)
+
+**Max Queue:** 5 Posts (Frontend umschaltbar zwischen 3 und 5 Slots).
+
+**Timing:** Nächster Slot = letzter `scheduled_at` + `intervalDays`. Uhrzeit = Zufall innerhalb `publish_window`.
+
+### Schritt 2: Text-Prompt an Claude bauen
+
+Der Prompt wird aus folgenden Quellen zusammengesetzt:
+
+| Abschnitt | Quelle |
+|-----------|--------|
+| UNTERNEHMEN | `config.topic` |
+| MARKEN-KONTEXT (Website) | `config.brand_context` (gescrapte Website) |
+| USPs & BESONDERHEITEN | `config.brand_keywords` |
+| LETZTE POSTS DIESES TYPS | Letzte 4 gepostete Posts gleichen Typs aus DB (Anti-Wiederholung) |
+| LETZTE BILDSZENEN | `image_concept` der letzten Posts (für Bildvariation) |
+| PRODUKT IM FOKUS | `product.name + .description + .tags` (nur bei Spotlight) |
+| POST-TYP | Aus Rotation bestimmt, z.B. "Story / Testimonial" |
+| IMAGE RULE | Post-typ-spezifische Bildregeln (siehe unten) |
+| STIL | `auto` → Claude wählt selbst; `manual` → aus Config |
+| TEXTLÄNGE | `config.text_length` → z.B. "Mittel (3-5 Sätze)" |
+| SPRACHE | `config.language` |
+
+**Anti-Wiederholungs-Kontext:**
 ```
-Payload: { productImageId, mode, backgroundPrompt? }
-→ Router nach mode: original / removed_bg / replaced_bg / ai_generated
-→ Supabase PATCH: processed_url + processing_status = 'done'
-→ Response: { success, processed_url }
+LETZTE POSTS DIESES TYPS (Wiederholungen unbedingt vermeiden):
+- [vor 3 Tagen]: "Wusstest du, dass pflanzliche Isoflavone..."
+- [vor 7 Tagen]: "Ein spannender Trend: Die natürliche..."
+WICHTIG: Wähle eine ANDERE Eröffnung, ein ANDERES Thema und einen ANDEREN Ton.
+LETZTE BILDSZENEN (andere Szene wählen): "A serene woman...", "Close-up of natural..."
 ```
 
-**Für mode `ai_generated` (NEU im N8N-Workflow ergänzen):**
-```
-→ Produkt-Daten laden (name, description, brand_keywords aus config)
-→ Prompt bauen:
-  "Professional product photography of [product.name].
-   [product.description]. [brand_keywords].
-   Clean commercial style, high quality, [image_style from config]."
-→ Flux 1.1 Pro generieren
-→ Supabase Storage Upload (product-images bucket)
-→ Supabase PATCH: processed_url, processing_status = 'done'
-   (original_url = processed_url da kein Upload, nur URL setzen)
+**Claude-Antwortformat:**
+```json
+{"text": "<Post-Text>", "image_concept": "<EN-Bildbeschreibung>", "scene_type": "people|scene"}
 ```
 
-### Replicate API – Wichtige Hinweise
-- `lucataco/remove-bg` → `/v1/predictions` mit `version` (NICHT `/v1/models/...`)
-- `bria/generate-background` → `/v1/models/bria/.../predictions`
-- `flux-1.1-pro` → `/v1/models/black-forest-labs/flux-1.1-pro/predictions`
-- Rate-Limit bei < $5 Guthaben → Waits nötig (20s Code-Nodes bereits eingebaut)
+### Schritt 3: Post-Typ-spezifische Bildregeln
 
-### Webhook-Tabelle
+Claude bekommt pro Post-Typ eigene IMAGE RULES im Prompt:
 
-| Aktion | Payload | Response |
-|--------|---------|----------|
-| Post generieren (1 Stück) | `{manual: true}` | HTTP 200 |
-| Text neu | `{postId}` | `{success, content}` |
-| Bild neu | `{postId}` | `{success, imageUrl}` |
-| Sofort posten | `{postId}` | HTTP 200 |
-| Engagement | `{manual: true}` | HTTP 200 |
-| Website scrapen | `{url, userId}` | `{success, brand_context}` |
-| Produktbild verarbeiten | `{productImageId, mode, backgroundPrompt?}` | `{success, processed_url}` |
+| Typ | `scene_type` | Kernregel |
+|-----|-------------|-----------|
+| **story** | MUSS `people` | Authentische Person in privatem Moment (lesen, Natur, Fenster). Kein Produkt, keine Teetassen. Setting variieren. |
+| **tip** | Bevorzugt `scene` | Ergebnis/Kontext des Tipps zeigen. Menschen dürfen gelegentlich vorkommen, Fokus auf Konzept. |
+| **trend** | Bevorzugt `scene` | Editorial, atmosphärisch, Magazin-Stil. Menschen dürfen vorkommen wenn thematisch passend. |
+| **knowledge** | Bevorzugt `scene` | Visuelles Metapher, Close-ups, Flat-Lays. Menschen dürfen gelegentlich als Teil der Szene vorkommen. |
+| **spotlight** | MUSS `scene` | Produkt als visueller Held. Personen nur im Hintergrund. Kein Halten/Präsentieren. |
+
+### Schritt 4: Claude-Response parsen (`Text parsen (Plan)`)
+
+1. Code-Fences stripping (` ```json ... ``` `)
+2. `{...}`-Block per Regex extrahieren
+3. `JSON.parse()` versuchen
+4. **Regex-Fallback** bei Parse-Fehler (z.B. unescapte `"` in Story-Zitaten): Felder über Key-Boundaries extrahieren
+5. **`scene_type` Override:** Story → `people` erzwungen, Spotlight → `scene` erzwungen
+6. Letzter Fallback: Rohtext als Content
+
+### Schritt 5: Bildprompt zusammenbauen
+
+**Style-Varianten-Rotation:** Statt eines festen `styleDesc` rotieren 4 Varianten pro Bildstil (Index = `allPosts.length % 4`):
+
+| Stil | Variante 0 | Variante 1 | Variante 2 | Variante 3 |
+|------|-----------|-----------|-----------|-----------|
+| realistic | Canon EOS R5, natural light | Leica M10, documentary | Golden hour, cinematic | Overcast, Fujifilm X-T4 |
+| comic | Bold outlines, cheerful | Pastel, Scandinavian | Hand-drawn, textured | Minimalist line art |
+| art | Impressionist, rich palette | Watercolor, loose strokes | Acrylic, textured canvas | Mixed media collage |
+| fantasy | Soft lens flare, dreamy | Volumetric light, epic | Morning mist, enchanted | Surreal dreamscape |
+
+**Bildprompt-Formel (wenn `imageConcept` vorhanden):**
+```
+{styleDesc}. {imageConcept} Brand: {brandKeywords}. Industry: {industry}. Age: {ageRange}.
+No text/words/logos. No writing on clothing. People must not hold/carry/present any product. No floating objects. Safe for work.
+```
+
+### Schritt 6: Modell-Routing & Speichern
+
+| `scene_type` | Modell | API-Endpunkt |
+|-------------|--------|--------------|
+| `people` | Imagen 4 | `/v1/models/google/imagen-4/predictions` |
+| `scene` | Flux 1.1 Pro Ultra | `/v1/models/black-forest-labs/flux-1.1-pro-ultra/predictions` |
+
+Post wird gespeichert mit: `content`, `image_concept`, `image_url`, `config_snapshot` (inkl. `scene_type`), `post_type`, `product_id`.
+
+### Publish-Pfade
+
+Beide Publish-Nodes (`Post fuer Publish` + `Posts vorbereiten`) haben eine `cleanContent()`-Funktion die JSON-Reste aus dem Content extrahiert bevor er an Facebook gesendet wird.
+
+---
+
+## Frontend – Besonderheiten
+
+### `parsePostContent()` (ContentPlanning.tsx + PostPreviewModal.tsx)
+Defensives Parsing: Wenn `post.content` rohes JSON enthält (Code-Fences + JSON-Objekt), wird nur der `text`-Wert extrahiert. Regex-Fallback für Story-Posts mit unescapten Anführungszeichen.
+
+### Content-Planung Features
+- **3/5 Slot-Toggle** (localStorage): Wählbar zwischen 3 und 5 Vorschau-Kacheln
+- **Auto-Fill bei Bot-Aktivierung:** Beim Einschalten werden fehlende Slots sequenziell generiert
+- **"Alle löschen"-Button:** Löscht alle geplanten Posts mit Bestätigungsdialog
+- **Agent-Status-Text:** Zeigt bei aktivem Bot einen Hinweis zur automatischen Generierung/Veröffentlichung
 
 ---
 
 ## Aktueller Stand (Stand: April 2026)
 
 ### ✅ Fertig
-- Frontend komplett (Login, Dashboard, Content-Planung, Settings, Analytics)
-- Supabase Auth Login + Registrierung
-- Dark Mode
-- Refactoring App.tsx → 11 Komponenten-Dateien
-- Webhook-Status-Anzeige
-- Kalender-View interaktiv
-- Post-Vorschau Mockup (Facebook + Instagram)
-- Kachel-Paginierung
-- Settings Redesign (3 Tabs)
-- Knowledge Base (Website-URL Scraping)
-- Produkt-Portfolio (CRUD) mit "Nächster"-Badge (wie Content-Varianten)
-- Content-Varianten (5 Post-Typen, Rotation)
-- Individuelle Stiloptionen (styleOverrides)
-- N8N: 7 Pfade inkl. Scraper + Produktbild-Verarbeitung
-- N8N: Post-Typ-Rotation + Produkt-Rotation (nur Spotlight) + erweiterter Prompt
-- N8N: Merge-Nodes für zuverlässigen Datenfluss (Posts + Produkte + Bilder)
-- N8N: Multi-Item-Processing korrekt (Index-Matching in Text/Bild parsen)
-- N8N: Workflow-Updates via REST API (UI-Import unzuverlässig für Connections)
-- Kontextbezogene Bildgenerierung
-- Produktbilder: Upload, Verarbeitung (Freistellen + Hintergrund), Modus-Auswahl
-- Produktbild-Auswahl nach `image_mode` + `processed_url` Fallback
-- Bria AI Integration
-- Abbrechen-Button für Upload/Verarbeitung im ProductManager
-- Aufklapp-Schaltfläche mit Text statt Pfeil
-- Speichern-Buttons einheitlich benannt ("Einstellungen speichern")
-- Bildmodus-Kennzeichnung pro Bild (Badge immer sichtbar)
-- Fallback-Sektion vereinfacht (nur Info-Text)
-- KI-Bild direkt im ProductManager generierbar
-- Content-Planung: 1 Post pro Klick (statt 3), einzelne Kachel-Generierung mit Spinner
-- Content-Planung: Globale Sperre bei Text/Bild-Regenerierung (Replicate Rate-Limit)
-- Content-Planung: Leere Kacheln zeigen Lock-State während Generierung
-- Produkt-Bearbeitungsformular über der Liste (statt darunter)
+- Komplettes Frontend (Login, Dashboard, Content-Planung, Settings, Analytics, Onboarding-Wizard)
+- Supabase Auth + Dark Mode
+- 8 N8N Webhook-Pfade
+- Content-Varianten-Rotation (trend → knowledge → story → tip → spotlight)
+- Dual-Model-Routing (Imagen 4 / Flux Ultra)
+- Post-Typ-spezifische Bildregeln im Claude-Prompt
+- scene_type erzwungen für Story (people) und Spotlight (scene)
+- Anti-Wiederholungs-Kontext (letzte 4 Posts + Bildszenen im Prompt)
+- Style-Varianten-Rotation (4 Varianten pro Bildstil)
+- image_concept Persistierung in posts-Tabelle
+- Sanitize-Funktion für Unicode-Surrogate im Prompt
+- Content-Cleaning in Publish-Nodes (cleanContent)
+- Story-JSON-Parse-Fix (Regex-Fallback für unescapte Anführungszeichen)
+- Produktbilder: Upload, Freistellen, KI-Hintergrund, KI-generiert
+- Business-Typ & Branche, adaptive Labels
+- Settings: 3 Tabs, KI-Vorschläge neu generieren
+- Plattform-Schalter (both/facebook/instagram)
 
 ### 📋 Geplant
 - A/B Testing
-
-### 💡 Vor Verkauf umsetzen: Multi-Tenancy
-Jeder Kunde bekommt eine eigene N8N-Instanz. Damit das Frontend die richtige Instanz anspricht:
-1. Neue Spalte `webhook_base_url` in `config`-Tabelle (z.B. `https://n8n-kunde1.example.com/webhook`)
-2. Frontend liest Base-URL dynamisch aus Config statt aus `VITE_`-Env-Variablen
-3. Alle Webhook-Calls nutzen `config.webhookBaseUrl + '/trigger-planning'` etc.
-4. Ein einziges Frontend-Build für alle Kunden, RLS via `user_id` trennt die Daten
+- Multi-Tenancy (webhook_base_url pro Kunde)
 
 ---
 
 ## Bekannte Schwachstellen
-1. ~~Login hardcoded~~ → Supabase Auth
-2. N8N Credentials hardcoded – workflow.json in .gitignore
-3. ~~Flux NSFW-Filter~~ → Bildprompt basiert auf Post-Text + brand_keywords
-4. Replicate Rate-Limit bei < $5 Guthaben – Waits im Workflow nötig
+1. N8N Credentials hardcoded – workflow.json in .gitignore
+2. Replicate Rate-Limit bei < $5 Guthaben
+3. `brand_context` ist statischer Text-Dump ohne Zusammenfassung
+4. Text-Regenerierung (`/regenerate-text`) nutzt vereinfachten Prompt ohne JSON-Format und ohne Anti-Wiederholungs-Kontext
+5. `Text parsen (Plan)`: `styleVariantsMap` nur dort, `Image Prompt bauen` (Regenerate-Pfad) hat noch die alte `styleMap`
 
 ---
 

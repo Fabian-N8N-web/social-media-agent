@@ -3,8 +3,28 @@ import { SupabaseService } from '../supabaseClient';
 import { WEBHOOK_REGEN_TEXT, WEBHOOK_REGEN_IMAGE, WEBHOOK_TRIGGER_PLAN, WEBHOOK_PUBLISH_POST } from '../constants';
 import PostPreviewModal from './PostPreviewModal';
 
+function parsePostContent(content: string | undefined): string {
+  if (!content) return '';
+  const cleaned = content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+  if (cleaned.startsWith('{') && cleaned.includes('"text"')) {
+    try {
+      const parsed = JSON.parse(cleaned);
+      if (parsed.text) return parsed.text;
+    } catch {
+      // JSON.parse failed (unescaped quotes in Story-Zitaten) – Regex-Fallback
+      const m = cleaned.match(/"text"\s*:\s*"([\s\S]+?)"\s*,\s*"image_concept"\s*:\s*"/);
+      if (m) return m[1].replace(/\\n/g, '\n').replace(/\\"/g, '"');
+    }
+  }
+  return content;
+}
+
 export default function ContentPlanning({ showToast, onReload, botStatus, onToggleBot, generating, setGenerating }: { showToast: (msg: string, type: 'success' | 'error' | 'info') => void; onReload: () => void; botStatus: boolean; onToggleBot: () => void; generating: boolean; setGenerating: (v: boolean) => void }) {
   const [scheduledPosts, setScheduledPosts] = useState<any[]>([]);
+  const [slotCount, setSlotCount] = useState<3 | 5>(() => {
+    const saved = localStorage.getItem('slotCount');
+    return saved === '5' ? 5 : 3;
+  });
   const [loading, setLoading] = useState(true);
   const [regenerating, setRegenerating] = useState<Record<string, boolean>>({});
   const [publishing, setPublishing] = useState<Record<string, boolean>>({});
@@ -107,7 +127,7 @@ export default function ContentPlanning({ showToast, onReload, botStatus, onTogg
 
   const startEdit = (post: any) => {
     setEditingId(post.id);
-    setEditContent(post.content || '');
+    setEditContent(parsePostContent(post.content));
     const d = post.scheduled_at ? new Date(post.scheduled_at) : new Date();
     setEditDate(d.toISOString().split('T')[0]);
     setEditTime(d.toTimeString().slice(0, 5));
@@ -129,6 +149,17 @@ export default function ContentPlanning({ showToast, onReload, botStatus, onTogg
     try {
       await SupabaseService.deletePost(id);
       showToast('Post gelöscht', 'info');
+      await loadScheduled();
+      onReload();
+    } catch { showToast('Fehler beim Löschen', 'error'); }
+  };
+
+  const deleteAllPosts = async () => {
+    if (scheduledPosts.length === 0) return;
+    if (!window.confirm(`Alle ${scheduledPosts.length} geplanten Posts wirklich löschen?`)) return;
+    try {
+      await Promise.all(scheduledPosts.map(p => SupabaseService.deletePost(p.id)));
+      showToast(`${scheduledPosts.length} Posts gelöscht`, 'info');
       await loadScheduled();
       onReload();
     } catch { showToast('Fehler beim Löschen', 'error'); }
@@ -240,21 +271,74 @@ export default function ContentPlanning({ showToast, onReload, botStatus, onTogg
     }
   };
 
+  const handleToggleBot = async () => {
+    const wasActive = botStatus;
+    onToggleBot();
+    // Beim Aktivieren: fehlende Slots nacheinander füllen
+    if (!wasActive) {
+      const current = await SupabaseService.getScheduledPosts();
+      const missing = slotCount - current.length;
+      if (missing > 0) {
+        setGenerating(true);
+        showToast(`Agent aktiviert – ${missing} Post${missing > 1 ? 's werden' : ' wird'} generiert...`, 'info');
+        for (let i = 0; i < missing; i++) {
+          try {
+            const res = await fetch(WEBHOOK_TRIGGER_PLAN, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ manual: true })
+            });
+            if (!res.ok) break;
+            // Warten bis der Post erscheint (max 2 Min pro Post)
+            let found = false;
+            for (let attempt = 0; attempt < 8; attempt++) {
+              await new Promise(r => setTimeout(r, 15000));
+              const updated = await SupabaseService.getScheduledPosts();
+              if (updated.length > current.length + i) {
+                const sorted = updated.sort((a: any, b: any) =>
+                  (a.scheduled_at ? new Date(a.scheduled_at).getTime() : Infinity) -
+                  (b.scheduled_at ? new Date(b.scheduled_at).getTime() : Infinity)
+                );
+                setScheduledPosts(sorted);
+                showToast(`Post ${i + 1}/${missing} generiert`, 'success');
+                found = true;
+                break;
+              }
+            }
+            if (!found) break;
+          } catch { break; }
+        }
+        setGenerating(false);
+        await loadScheduled();
+        onReload();
+      }
+    }
+  };
+
   const anyRegenerating = Object.values(regenerating).some(Boolean);
-  const emptySlots = Math.max(0, 3 - scheduledPosts.length);
+  const emptySlots = Math.max(0, slotCount - scheduledPosts.length);
 
   return (
     <div className="content-planning">
       <div className="planning-header">
         <div>
           <h1>Content-Planung</h1>
-          <p className="planning-subtitle">Die nächsten 3 geplanten Posts – prüfe, bearbeite oder generiere neu.</p>
+          <p className="planning-subtitle">Die nächsten {slotCount} geplanten Posts – prüfe, bearbeite oder generiere neu.</p>
         </div>
         <div className="planning-header-actions">
           <div className="view-toggle">
             <button className={`view-toggle-btn ${viewMode === 'cards' ? 'active' : ''}`} onClick={() => setViewMode('cards')}>📋 Kacheln</button>
             <button className={`view-toggle-btn ${viewMode === 'calendar' ? 'active' : ''}`} onClick={() => setViewMode('calendar')}>📅 Kalender</button>
           </div>
+          <div className="view-toggle">
+            <button className={`view-toggle-btn ${slotCount === 3 ? 'active' : ''}`} onClick={() => { setSlotCount(3); localStorage.setItem('slotCount', '3'); }}>3 Slots</button>
+            <button className={`view-toggle-btn ${slotCount === 5 ? 'active' : ''}`} onClick={() => { setSlotCount(5); localStorage.setItem('slotCount', '5'); }}>5 Slots</button>
+          </div>
+          {scheduledPosts.length > 0 && (
+            <button className="action-button secondary danger-text" onClick={deleteAllPosts} disabled={loading || generating}>
+              🗑️ Alle löschen
+            </button>
+          )}
           <button className="action-button secondary" onClick={loadScheduled} disabled={loading}>
             <span className={loading ? 'spin' : ''}>🔄</span> Aktualisieren
           </button>
@@ -264,12 +348,16 @@ export default function ContentPlanning({ showToast, onReload, botStatus, onTogg
       <div className={`bot-control-panel ${botStatus ? '' : 'bot-inactive'}`}>
         <div className="bot-status-header">
           <h2>{botStatus ? '🟢 Agent aktiv' : '🔴 Agent deaktiviert'}</h2>
-          <div className={`bot-toggle-button ${botStatus ? 'active' : ''}`} onClick={onToggleBot}>
+          <div className={`bot-toggle-button ${botStatus ? 'active' : ''}`} onClick={handleToggleBot}>
             <div className="toggle-slider"></div>
             <span className="toggle-label">{botStatus ? 'AN' : 'AUS'}</span>
           </div>
         </div>
-        {!botStatus && (
+        {botStatus ? (
+          <div className="bot-info">
+            <p>Der Agent generiert automatisch neue Posts und veröffentlicht fällige Beiträge zur geplanten Zeit.</p>
+          </div>
+        ) : (
           <div className="bot-info">
             <p>Der Agent ist pausiert. Es werden keine neuen Posts automatisch generiert oder veröffentlicht.</p>
           </div>
@@ -326,24 +414,24 @@ export default function ContentPlanning({ showToast, onReload, botStatus, onTogg
           }}
           onSelectPost={(postId) => {
             const idx = scheduledPosts.findIndex(p => p.id === postId);
-            if (idx >= 0) setCardPage(Math.floor(idx / 3));
+            if (idx >= 0) setCardPage(Math.floor(idx / slotCount));
             setViewMode('cards');
           }}
         />
       ) : (
         <>
-        {scheduledPosts.length > 3 && (
+        {scheduledPosts.length > slotCount && (
           <div className="card-pager">
             <button className="card-pager-btn" onClick={() => setCardPage(p => Math.max(0, p - 1))} disabled={cardPage === 0}>‹</button>
-            <span className="card-pager-label">Posts {cardPage * 3 + 1}–{Math.min((cardPage + 1) * 3, scheduledPosts.length)} von {scheduledPosts.length}</span>
-            <button className="card-pager-btn" onClick={() => setCardPage(p => Math.min(Math.ceil(scheduledPosts.length / 3) - 1, p + 1))} disabled={(cardPage + 1) * 3 >= scheduledPosts.length}>›</button>
+            <span className="card-pager-label">Posts {cardPage * slotCount + 1}–{Math.min((cardPage + 1) * slotCount, scheduledPosts.length)} von {scheduledPosts.length}</span>
+            <button className="card-pager-btn" onClick={() => setCardPage(p => Math.min(Math.ceil(scheduledPosts.length / slotCount) - 1, p + 1))} disabled={(cardPage + 1) * slotCount >= scheduledPosts.length}>›</button>
           </div>
         )}
         <div className="planning-cards">
-          {scheduledPosts.slice(cardPage * 3, cardPage * 3 + 3).map((post, idx) => (
+          {scheduledPosts.slice(cardPage * slotCount, cardPage * slotCount + slotCount).map((post, idx) => (
             <div key={post.id} className="planning-card">
               <div className="pcard-header">
-                <div className="pcard-number">#{cardPage * 3 + idx + 1}</div>
+                <div className="pcard-number">#{cardPage * slotCount + idx + 1}</div>
                 <div className="pcard-schedule">
                   {post.post_type && (
                     <span className="pcard-post-type-badge">
@@ -360,7 +448,11 @@ export default function ContentPlanning({ showToast, onReload, botStatus, onTogg
                 </div>
               </div>
 
-              <div className="pcard-image-wrap">
+              <div
+                className="pcard-image-wrap pcard-image-clickable"
+                onClick={() => setPreviewPost(post)}
+                title="Vorschau öffnen"
+              >
                 {post.image_url ? (
                   <img src={post.image_url} alt="Geplanter Post" className="pcard-image" />
                 ) : (
@@ -376,9 +468,14 @@ export default function ContentPlanning({ showToast, onReload, botStatus, onTogg
                   <button
                     className="pcard-mid-btn"
                     onClick={() => regenerateImage(post.id)}
-                    disabled={anyRegenerating || uploading[post.id]}
+                    disabled={anyRegenerating || uploading[post.id] || generating}
+                    title={generating ? 'Während ein neuer Post generiert wird gesperrt' : undefined}
                   >
-                    {regenerating[post.id + '_img'] ? <><span className="spin">🔄</span> Generiert...</> : '🎨 Neues Bild generieren'}
+                    {regenerating[post.id + '_img']
+                      ? <><span className="spin">🔄</span> Generiert...</>
+                      : generating
+                        ? <><span>🔒</span> Neues Bild generieren</>
+                        : '🎨 Neues Bild generieren'}
                   </button>
                   <button
                     className="pcard-mid-btn"
@@ -390,15 +487,17 @@ export default function ContentPlanning({ showToast, onReload, botStatus, onTogg
                   <button
                     className="pcard-mid-btn"
                     onClick={() => regenerateText(post.id)}
-                    disabled={anyRegenerating}
+                    disabled={anyRegenerating || generating}
+                    title={generating ? 'Während ein neuer Post generiert wird gesperrt' : undefined}
                   >
-                    {regenerating[post.id + '_text'] ? <><span className="spin">🔄</span> Generiert...</> : '🤖 Neuen Text generieren'}
+                    {regenerating[post.id + '_text']
+                      ? <><span className="spin">🔄</span> Generiert...</>
+                      : generating
+                        ? <><span>🔒</span> Neuen Text generieren</>
+                        : '🤖 Neuen Text generieren'}
                   </button>
                   <button className="pcard-mid-btn" onClick={() => startEdit(post)}>
                     ✏️ Eigenen Text verfassen
-                  </button>
-                  <button className="pcard-mid-btn" onClick={() => setPreviewPost(post)}>
-                    👁️ Vorschau
                   </button>
                   <input
                     type="file"
@@ -434,7 +533,7 @@ export default function ContentPlanning({ showToast, onReload, botStatus, onTogg
               ) : (
                 <>
                   <div className="pcard-content">
-                    <p className="pcard-text">{post.content}</p>
+                    <p className="pcard-text">{parsePostContent(post.content)}</p>
                   </div>
 
                   {editingScheduleId === post.id ? (
@@ -596,7 +695,7 @@ function MiniCalendar({ posts, generating, onGenerateForDate, onSelectPost }: {
             >
               <span className="cal-day-num">{day}</span>
               {dayPosts.map((p, idx) => (
-                <div key={idx} className="cal-post-dot" title={p.content?.substring(0, 60)}>
+                <div key={idx} className="cal-post-dot" title={parsePostContent(p.content).substring(0, 60)}>
                   {new Date(p.scheduled_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
                 </div>
               ))}
@@ -615,7 +714,7 @@ function MiniCalendar({ posts, generating, onGenerateForDate, onSelectPost }: {
                   <div className="cal-day-post-time">
                     {new Date(p.scheduled_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} Uhr
                   </div>
-                  <div className="cal-day-post-text">{p.content?.substring(0, 100)}{p.content?.length > 100 ? '...' : ''}</div>
+                  <div className="cal-day-post-text">{parsePostContent(p.content).substring(0, 100)}{parsePostContent(p.content).length > 100 ? '...' : ''}</div>
                   <button className="action-button secondary cal-to-cards-btn" onClick={() => onSelectPost(p.id)}>
                     📋 Zur Kachel-Ansicht
                   </button>

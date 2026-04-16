@@ -1,8 +1,12 @@
 export type ImageMode = 'original' | 'removed_bg' | 'replaced_bg' | 'ai_generated';
 
+export type BusinessType = 'products' | 'services' | 'mixed';
+
 export interface Config {
   tonality: string;
   topic: string;
+  businessType: BusinessType;
+  industry: string;
   targetAudience: string;
   ageRange: { min: number; max: number };
   postFrequency: number;
@@ -21,6 +25,12 @@ export interface Config {
   styleMode: 'auto' | 'manual';
   enabledPostTypes: string[];
   imageFallbackMode: ImageMode;
+  setupCompleted: boolean;
+  publishPlatform: 'both' | 'facebook' | 'instagram';
+  imageModels: {
+    people: string;  // Replicate-Slug, z.B. "google/imagen-4"
+    scene: string;   // Replicate-Slug, z.B. "black-forest-labs/flux-1.1-pro-ultra"
+  };
   styleOverrides: {
     tonality: 'auto' | 'manual';
     targetAudience: 'auto' | 'manual';
@@ -49,6 +59,7 @@ export interface Product {
   description?: string;
   tags?: string[];
   image_mode: ImageMode;
+  entry_type?: 'product' | 'service' | null;
   created_at: string;
   images?: ProductImage[];
 }

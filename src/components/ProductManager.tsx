@@ -1,13 +1,21 @@
 import { useState, useEffect, useRef } from 'react';
 import { SupabaseService, supabase } from '../supabaseClient';
-import type { Product, ProductImage } from '../types';
+import type { Product, ProductImage, BusinessType } from '../types';
 
 interface Props {
   showToast: (msg: string, type: 'success' | 'error' | 'info') => void;
   nextProductId?: string | null;
+  businessType?: BusinessType;
 }
 
-export default function ProductManager({ showToast, nextProductId }: Props) {
+export default function ProductManager({ showToast, nextProductId, businessType = 'products' }: Props) {
+  // Adaptive Labels je nach Business-Typ
+  const entity = businessType === 'services' ? 'Dienstleistung' : businessType === 'mixed' ? 'Eintrag' : 'Produkt';
+  const entityPlural = businessType === 'services' ? 'Dienstleistungen' : businessType === 'mixed' ? 'Einträge' : 'Produkte';
+  const entityPlaceholder = businessType === 'services' ? 'z. B. Steildachsanierung' : businessType === 'mixed' ? 'z. B. Angebot …' : 'z. B. Omega-3 Kapseln';
+  const entityDescPlaceholder = businessType === 'services'
+    ? 'Umfang, Zielkunden, Besonderheiten …'
+    : 'Kurzbeschreibung für den AI-Kontext…';
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading]   = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -16,23 +24,15 @@ export default function ProductManager({ showToast, nextProductId }: Props) {
   const [name, setName]               = useState('');
   const [description, setDescription] = useState('');
   const [tags, setTags]               = useState('');
+  // Bei mixed waehlt der User pro Eintrag ob Produkt oder Dienstleistung.
+  // Bei products/services ist der Typ implizit (wird beim Speichern gesetzt).
+  const [entryType, setEntryType]     = useState<'product' | 'service'>('product');
 
   const [productImages, setProductImages] = useState<Record<string, ProductImage[]>>({});
   const [uploadingFor, setUploadingFor] = useState<string | null>(null);
   const [expandedProduct, setExpandedProduct] = useState<string | null>(null);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
-
-  const load = async () => {
-    try {
-      setLoading(true);
-      const data = await SupabaseService.getProducts();
-      setProducts(data);
-    } catch { showToast('Produkte konnten nicht geladen werden', 'error'); }
-    finally { setLoading(false); }
-  };
-
-  useEffect(() => { load(); }, []);
 
   const loadImagesForProduct = async (productId: string) => {
     try {
@@ -42,6 +42,29 @@ export default function ProductManager({ showToast, nextProductId }: Props) {
       showToast('Bilder konnten nicht geladen werden', 'error');
     }
   };
+
+  const load = async () => {
+    try {
+      setLoading(true);
+      const data = await SupabaseService.getProducts();
+      setProducts(data);
+      // Bilder für alle Produkte parallel vorladen, damit der Foto-Counter korrekt angezeigt wird
+      const imagesEntries = await Promise.all(
+        data.map(async (p: Product) => {
+          try {
+            const imgs = await SupabaseService.getProductImages(p.id);
+            return [p.id, imgs] as const;
+          } catch {
+            return [p.id, []] as const;
+          }
+        })
+      );
+      setProductImages(Object.fromEntries(imagesEntries));
+    } catch { showToast(`${entityPlural} konnten nicht geladen werden`, 'error'); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
 
   const toggleExpand = (productId: string) => {
     if (expandedProduct === productId) {
@@ -54,30 +77,41 @@ export default function ProductManager({ showToast, nextProductId }: Props) {
     }
   };
 
-  const resetForm = () => { setName(''); setDescription(''); setTags(''); setEditingId(null); setShowForm(false); };
+  const resetForm = () => {
+    setName(''); setDescription(''); setTags('');
+    setEntryType(businessType === 'services' ? 'service' : 'product');
+    setEditingId(null); setShowForm(false);
+  };
 
   const startEdit = (p: Product) => {
     setName(p.name);
     setDescription(p.description || '');
     setTags((p.tags || []).join(', '));
+    setEntryType(effectiveEntryType(p));
     setEditingId(p.id);
     setShowForm(true);
   };
 
+  // Effektiver Typ eines Produkts: explizit gesetzt oder aus businessType abgeleitet.
+  const effectiveEntryType = (p: Product): 'product' | 'service' =>
+    p.entry_type ?? (businessType === 'services' ? 'service' : 'product');
+
   const handleSave = async () => {
-    if (!name.trim()) { showToast('Produktname ist erforderlich', 'error'); return; }
-    const payload = {
+    if (!name.trim()) { showToast(`${entity}sname ist erforderlich`, 'error'); return; }
+    const payload: any = {
       name: name.trim(),
       description: description.trim(),
-      tags: tags.split(',').map(t => t.trim()).filter(Boolean)
+      tags: tags.split(',').map(t => t.trim()).filter(Boolean),
+      // Nur bei mixed explizit speichern - sonst implizit aus businessType
+      entry_type: businessType === 'mixed' ? entryType : null
     };
     try {
       if (editingId) {
         await SupabaseService.updateProduct(editingId, payload);
-        showToast('Produkt aktualisiert', 'success');
+        showToast(`${entity} aktualisiert`, 'success');
       } else {
         await SupabaseService.createProduct(payload);
-        showToast('Produkt hinzugefuegt', 'success');
+        showToast(`${entity} hinzugefuegt`, 'success');
       }
       resetForm();
       await load();
@@ -85,10 +119,10 @@ export default function ProductManager({ showToast, nextProductId }: Props) {
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm('Dieses Produkt loeschen?')) return;
+    if (!window.confirm(`${entity === 'Produkt' ? 'Dieses Produkt' : entity === 'Dienstleistung' ? 'Diese Dienstleistung' : 'Diesen Eintrag'} loeschen?`)) return;
     try {
       await SupabaseService.deleteProduct(id);
-      showToast('Produkt geloescht', 'info');
+      showToast(`${entity} geloescht`, 'info');
       await load();
     } catch { showToast('Fehler beim Loeschen', 'error'); }
   };
@@ -143,18 +177,39 @@ export default function ProductManager({ showToast, nextProductId }: Props) {
   return (
     <div className="product-manager">
       {loading ? (
-        <p className="pm-loading">Lade Produkte...</p>
+        <p className="pm-loading">Lade {entityPlural}...</p>
       ) : (
         <>
           {showForm ? (
             <div className="pm-form">
+              {businessType === 'mixed' && (
+                <div className="setting-group">
+                  <label>Typ</label>
+                  <div className="tone-buttons">
+                    <button
+                      type="button"
+                      className={`tone-button ${entryType === 'product' ? 'active' : ''}`}
+                      onClick={() => setEntryType('product')}
+                    >
+                      📦 Produkt
+                    </button>
+                    <button
+                      type="button"
+                      className={`tone-button ${entryType === 'service' ? 'active' : ''}`}
+                      onClick={() => setEntryType('service')}
+                    >
+                      🔧 Dienstleistung
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="setting-group">
-                <label>Produktname *</label>
-                <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="z.B. Omega-3 Kapseln" />
+                <label>{businessType === 'mixed' ? (entryType === 'service' ? 'Dienstleistungs' : 'Produkt') + 'name *' : `${entity}sname *`}</label>
+                <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder={businessType === 'mixed' ? (entryType === 'service' ? 'z. B. Steildachsanierung' : 'z. B. Omega-3 Kapseln') : entityPlaceholder} />
               </div>
               <div className="setting-group">
                 <label>Beschreibung</label>
-                <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2} placeholder="Kurzbeschreibung für den AI-Kontext..." className="setting-textarea" />
+                <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2} placeholder={entityDescPlaceholder} className="setting-textarea" />
               </div>
               <div className="setting-group">
                 <label>Tags (kommagetrennt)</label>
@@ -166,7 +221,7 @@ export default function ProductManager({ showToast, nextProductId }: Props) {
               </div>
             </div>
           ) : (
-            <button className="pm-add-btn" onClick={() => setShowForm(true)}>+ Produkt hinzufügen</button>
+            <button className="pm-add-btn" onClick={() => setShowForm(true)}>+ {entity} hinzufügen</button>
           )}
 
           <div className="pm-list">
@@ -175,6 +230,11 @@ export default function ProductManager({ showToast, nextProductId }: Props) {
                 <div className="pm-item-header" onClick={() => toggleExpand(p.id)}>
                   <div className="pm-item-info">
                     <div className="pm-item-name">
+                      {businessType === 'mixed' && (
+                        <span className={`pm-type-badge pm-type-${effectiveEntryType(p)}`}>
+                          {effectiveEntryType(p) === 'service' ? '🔧 Dienstleistung' : '📦 Produkt'}
+                        </span>
+                      )}
                       {p.name}
                       {nextProductId === p.id && <span className="post-type-next-badge">als nächstes dran</span>}
                     </div>
@@ -262,7 +322,7 @@ export default function ProductManager({ showToast, nextProductId }: Props) {
       )}
 
       <div className="pm-info-box">
-        <p>Der Agent wählt bei jedem neuen Post automatisch ein Produkt aus und kombiniert es mit dem passenden Post-Typ. Bei mehreren Bildern pro Produkt rotiert er automatisch.</p>
+        <p>Der Agent wählt bei jedem neuen Post automatisch {entity === 'Dienstleistung' ? 'eine Dienstleistung' : entity === 'Eintrag' ? 'einen Eintrag' : 'ein Produkt'} aus und kombiniert {entity === 'Dienstleistung' ? 'sie' : 'es'} mit dem passenden Post-Typ. Bei mehreren Bildern rotiert er automatisch.</p>
       </div>
 
       {lightboxUrl && (

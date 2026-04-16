@@ -162,7 +162,7 @@ export const SupabaseService = {
     return data || [];
   },
 
-  async createProduct(product: { name: string; description?: string; tags?: string[]; user_id?: string }) {
+  async createProduct(product: { name: string; description?: string; tags?: string[]; entry_type?: 'product' | 'service' | null; user_id?: string }) {
     const { data, error } = await supabase
       .from('products')
       .insert([{ ...product, user_id: product.user_id || 'admin' }])
@@ -172,7 +172,7 @@ export const SupabaseService = {
     return data;
   },
 
-  async updateProduct(id: string, updates: { name?: string; description?: string; tags?: string[]; image_mode?: string }) {
+  async updateProduct(id: string, updates: { name?: string; description?: string; tags?: string[]; image_mode?: string; entry_type?: 'product' | 'service' | null }) {
     const { data, error } = await supabase
       .from('products')
       .update(updates)

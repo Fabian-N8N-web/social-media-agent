@@ -1,20 +1,25 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { SupabaseService } from '../supabaseClient';
-import { WEBHOOK_SCRAPE } from '../constants';
-import type { Config } from '../types';
+import { WEBHOOK_SCRAPE, WEBHOOK_GENERATE_STYLE, IMAGE_MODEL_OPTIONS } from '../constants';
+import type { Config, Post } from '../types';
 import ProductManager from './ProductManager';
 
 interface Props {
   config: Config;
   onSave: (c: Config) => void;
   showToast: (msg: string, type: 'success' | 'error' | 'info') => void;
+  onRestartWizard?: () => void;
+  onReloadConfig?: () => Promise<void> | void;
+  posts?: Post[];
 }
 
-export default function Settings({ config, onSave, showToast }: Props) {
+export default function Settings({ config, onSave, showToast, onRestartWizard, onReloadConfig, posts }: Props) {
   const [localConfig, setLocalConfig] = useState(config);
-  const [activeTab, setActiveTab] = useState<'text' | 'image' | 'schedule'>('text');
+  const [activeTab, setActiveTab] = useState<'business' | 'content' | 'schedule'>('business');
+  const [refreshing, setRefreshing] = useState(false);
   const [imagePromptMode, setImagePromptMode] = useState<'auto' | 'manual'>(config.imagePrompt ? 'manual' : 'auto');
   const [scrapingLoading, setScrapingLoading] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
   const [nextPostType, setNextPostType] = useState<string | null>(null);
   const [nextProductId, setNextProductId] = useState<string | null>(null);
 
@@ -32,26 +37,32 @@ export default function Settings({ config, onSave, showToast }: Props) {
           .filter((p: any) => p.status === 'scheduled')
           .sort((a: any, b: any) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime());
 
-        const allTypes = ['spotlight', 'trend', 'knowledge', 'story', 'tip'];
+        const allTypes = ['trend', 'knowledge', 'story', 'tip', 'spotlight'];
         const enabled = (localConfig.enabledPostTypes || allTypes).filter((t: string) => allTypes.includes(t));
         if (enabled.length === 0) { setNextPostType(null); setNextProductId(null); return; }
 
-        // Exakt wie N8N: letzter scheduled Post mit post_type bestimmt den nächsten Typ
+        // Letzten Post-Typ bestimmen: scheduled zuerst, dann posted als Fallback
         const scheduledWithType = scheduled.filter((p: any) => p.post_type);
+        let lastType = '';
         if (scheduledWithType.length > 0) {
-          const lastType = scheduledWithType[scheduledWithType.length - 1].post_type;
-          const lastIdx = enabled.indexOf(lastType);
-          setNextPostType(enabled[lastIdx >= 0 ? (lastIdx + 1) % enabled.length : 0]);
+          lastType = scheduledWithType[scheduledWithType.length - 1].post_type;
         } else {
-          // Keine scheduled Posts → N8N startet bei Index 0
-          setNextPostType(enabled[0]);
+          // Keine scheduled Posts → letzten geposteten Post heranziehen
+          const postedWithType = posts
+            .filter((p: any) => p.status === 'posted' && p.post_type)
+            .sort((a: any, b: any) => new Date(a.scheduled_at || a.created_at).getTime() - new Date(b.scheduled_at || b.created_at).getTime());
+          if (postedWithType.length > 0) {
+            lastType = postedWithType[postedWithType.length - 1].post_type;
+          }
         }
+        const lastIdx = enabled.indexOf(lastType);
+        setNextPostType(enabled[lastIdx >= 0 ? (lastIdx + 1) % enabled.length : 0]);
 
-        // Produkt-Rotation: zählt scheduled Spotlight-Posts (wie N8N)
+        // Produkt-Rotation: zählt Spotlight-Posts (scheduled + posted)
         const products = await SupabaseService.getProducts();
         if (products.length > 0) {
-          const scheduledSpotlights = scheduled.filter((p: any) => p.post_type === 'spotlight').length;
-          const nextIdx = scheduledSpotlights % products.length;
+          const allSpotlights = posts.filter((p: any) => p.post_type === 'spotlight').length;
+          const nextIdx = allSpotlights % products.length;
           setNextProductId(products[nextIdx].id);
         } else {
           setNextProductId(null);
@@ -61,7 +72,7 @@ export default function Settings({ config, onSave, showToast }: Props) {
     refresh();
     const interval = setInterval(refresh, 30000);
     return () => clearInterval(interval);
-  }, [localConfig.enabledPostTypes]);
+  }, [localConfig.enabledPostTypes, posts?.length]);
 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -123,15 +134,26 @@ export default function Settings({ config, onSave, showToast }: Props) {
     { key: 'inspirational', label: 'Inspirierend' }
   ];
 
+  const spotlightName = localConfig.businessType === 'services'
+    ? 'Dienstleistungs-Spotlight'
+    : localConfig.businessType === 'mixed'
+      ? 'Produkt- / Dienstleistungs-Spotlight'
+      : 'Produkt-Spotlight';
+  const spotlightDesc = localConfig.businessType === 'services'
+    ? 'Vorstellung einer Dienstleistung mit Mehrwert'
+    : localConfig.businessType === 'mixed'
+      ? 'Vorstellung eines Angebots (Produkt oder Dienstleistung) mit Mehrwert'
+      : 'Vorstellung eines Produkts mit Mehrwert';
+
   const postTypes = [
-    { key: 'spotlight', icon: '🔦', name: 'Produkt-Spotlight', desc: 'Vorstellung eines Produkts mit Mehrwert' },
+    { key: 'spotlight', icon: '🔦', name: spotlightName, desc: spotlightDesc },
     { key: 'trend', icon: '📰', name: 'Trend & News', desc: 'Aktuelles aus der Branche' },
     { key: 'knowledge', icon: '🧠', name: 'Wissens-Post', desc: 'Inhaltsstoffe, Hintergründe, Herstellung' },
     { key: 'story', icon: '💬', name: 'Story / Testimonial', desc: 'Gründergeschichte oder Kundenstimme' },
     { key: 'tip', icon: '💡', name: 'Tipp & Tutorial', desc: 'Konkreter Mehrwert, fördert Saves & Shares' },
   ];
 
-  const enabledPostTypes = localConfig.enabledPostTypes || ['spotlight', 'trend', 'knowledge', 'story', 'tip'];
+  const enabledPostTypes = localConfig.enabledPostTypes || ['trend', 'knowledge', 'story', 'tip', 'spotlight'];
   const styleOverrides = localConfig.styleOverrides || { tonality: 'auto', targetAudience: 'auto', ageRange: 'auto', language: 'auto', emojiUsage: 'auto', hashtags: 'auto' };
 
   const togglePostType = (key: string) => {
@@ -146,33 +168,123 @@ export default function Settings({ config, onSave, showToast }: Props) {
     set({ styleOverrides: { ...styleOverrides, [key]: styleOverrides[key] === 'auto' ? 'manual' : 'auto' } });
   };
 
+  const handleRefresh = async () => {
+    if (!onReloadConfig) return;
+    setRefreshing(true);
+    try {
+      await onReloadConfig();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const regenerateStyleSuggestions = async () => {
+    setRegenerating(true);
+    try {
+      const res = await fetch(WEBHOOK_GENERATE_STYLE, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: 'admin' })
+      });
+      if (!res.ok) throw new Error('Webhook fehlgeschlagen');
+      await res.json().catch(() => null);
+      showToast('KI-Vorschläge neu generiert – lade Einstellungen …', 'success');
+      if (onReloadConfig) await onReloadConfig();
+    } catch {
+      showToast('Fehler beim Generieren der Vorschläge', 'error');
+    } finally {
+      setRegenerating(false);
+    }
+  };
+
+  const toolbar = (
+    <div className="settings-toolbar">
+      {onReloadConfig && (
+        <button className="toolbar-btn toolbar-btn-refresh" onClick={handleRefresh} disabled={refreshing}>
+          <span className={refreshing ? 'spin' : ''}>🔄</span> Aktualisieren
+        </button>
+      )}
+      <button className="toolbar-btn toolbar-btn-save" onClick={handleSave}>💾 Einstellungen speichern</button>
+      {onRestartWizard && (
+        <button
+          className="toolbar-btn toolbar-btn-restart"
+          onClick={() => {
+            if (confirm('Setup erneut durchlaufen? Deine Einstellungen bleiben erhalten, du wirst aber zum Wizard weitergeleitet.')) {
+              onRestartWizard();
+            }
+          }}
+          title="Öffnet den Onboarding-Wizard erneut"
+        >
+          ↻ Setup neu starten
+        </button>
+      )}
+    </div>
+  );
+
   return (
     <div className="settings">
       <div className="settings-header">
         <h1>Einstellungen</h1>
-        <button className="save-button-large" onClick={handleSave}>💾 Einstellungen speichern</button>
       </div>
 
+      {toolbar}
+
       <div className="settings-tabs">
-        {([['text', '✍️ Textgenerierung'], ['image', '🎨 Bildgenerierung'], ['schedule', '📅 Zeitplan']] as const).map(([key, label]) => (
+        {([['business', '🏢 Über dein Business'], ['content', '🎨 Inhalt & Stil'], ['schedule', '📅 Zeitplan & Plattform']] as const).map(([key, label]) => (
           <button key={key} className={`settings-tab ${activeTab === key ? 'active' : ''}`} onClick={() => setActiveTab(key)}>{label}</button>
         ))}
       </div>
 
-      {/* ====== TAB 1: TEXTGENERIERUNG ====== */}
-      {activeTab === 'text' && (
+      {/* ====== TAB 1: ÜBER DEIN BUSINESS ====== */}
+      {activeTab === 'business' && (
         <div className="settings-tab-content">
           <div className="settings-section">
             <h2>Über dein Unternehmen</h2>
 
             <div className="setting-group">
-              <label>Unternehmen & Produkte</label>
+              <label>Business-Typ</label>
+              <div className="tone-buttons">
+                {([
+                  { key: 'products', label: '📦 Produkte' },
+                  { key: 'services', label: '🔧 Dienstleistungen' },
+                  { key: 'mixed',    label: '🔀 Beides' },
+                ] as const).map(b => (
+                  <button
+                    key={b.key}
+                    className={`tone-button ${localConfig.businessType === b.key ? 'active' : ''}`}
+                    onClick={() => set({ businessType: b.key })}
+                  >
+                    {b.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="setting-group">
+              <label>Branche</label>
+              <input
+                type="text"
+                value={localConfig.industry}
+                onChange={e => set({ industry: e.target.value })}
+                placeholder="z. B. Dachdeckerei & Fertighausbau, Nahrungsergänzung, Gastronomie …"
+              />
+              <p className="setting-hint">Wichtig für die Bilder: Bei Handwerk wählt die KI automatisch passende Arbeitskleidung und Sicherheitsausrüstung.</p>
+            </div>
+
+            <div className="setting-group">
+              <label>Unternehmen &amp; {localConfig.businessType === 'services' ? 'Dienstleistungen' : localConfig.businessType === 'mixed' ? 'Angebot' : 'Produkte'}</label>
               <textarea
                 className="setting-textarea"
                 value={localConfig.topic}
                 onChange={e => set({ topic: e.target.value })}
                 rows={4}
-                placeholder="Wir sind... Unsere Produkte... Unsere Zielgruppe..."
+                placeholder={
+                  localConfig.businessType === 'services'
+                    ? 'Wir sind … Unsere Leistungen … Unsere Kunden …'
+                    : localConfig.businessType === 'mixed'
+                      ? 'Wir sind … Unser Angebot … Unsere Zielgruppe …'
+                      : 'Wir sind … Unsere Produkte … Unsere Zielgruppe …'
+                }
               />
             </div>
 
@@ -221,11 +333,16 @@ export default function Settings({ config, onSave, showToast }: Props) {
           </div>
 
           <div className="settings-section">
-            <h2>Produkt-Portfolio</h2>
-            <p className="section-subtitle">Der Agent rotiert automatisch zwischen den Produkten.</p>
-            <ProductManager showToast={showToast} nextProductId={nextProductId} />
+            <h2>{localConfig.businessType === 'services' ? 'Dienstleistungs-Portfolio' : localConfig.businessType === 'mixed' ? 'Produkte & Dienstleistungen' : 'Produkt-Portfolio'}</h2>
+            <p className="section-subtitle">Der Agent rotiert automatisch zwischen den {localConfig.businessType === 'services' ? 'Dienstleistungen' : localConfig.businessType === 'mixed' ? 'Einträgen (Produkte & Dienstleistungen)' : 'Produkten'}.</p>
+            <ProductManager showToast={showToast} nextProductId={nextProductId} businessType={localConfig.businessType} />
           </div>
+        </div>
+      )}
 
+      {/* ====== TAB 2: INHALT & STIL ====== */}
+      {activeTab === 'content' && (
+        <div className="settings-tab-content">
           <div className="settings-section">
             <h2>Content-Varianten</h2>
             <p className="section-subtitle">Der Agent wechselt automatisch zwischen diesen Post-Typen – kein Post gleicht dem vorherigen.</p>
@@ -267,11 +384,20 @@ export default function Settings({ config, onSave, showToast }: Props) {
             <h2>Erweiterte Stiloptionen</h2>
             <p className="section-subtitle">Schalte einzelne Optionen auf „Manuell", um sie selbst festzulegen – sonst wählt die KI automatisch.</p>
 
+            <button
+              className="regenerate-style-btn"
+              onClick={regenerateStyleSuggestions}
+              disabled={regenerating}
+              title="Lässt die KI alle Auto-Werte neu aus deinem Business-Kontext ableiten"
+            >
+              {regenerating ? <><span className="spin">🔄</span> KI generiert …</> : <>🪄 KI-Vorschläge neu generieren</>}
+            </button>
+
             <div className="style-options-list">
               {/* Tonalität */}
               <div className="style-option-item">
                 <div className="style-option-header" onClick={() => toggleStyleOverride('tonality')}>
-                  <div><div className="style-option-name">Tonalität</div><div className="style-option-desc">{styleOverrides.tonality === 'auto' ? 'KI wählt passend zum Post-Typ' : tonalities.find(t => t.key === localConfig.tonality)?.label || 'Professionell'}</div></div>
+                  <div><div className="style-option-name">Tonalität</div><div className="style-option-desc">{styleOverrides.tonality === 'auto' ? `KI wählt automatisch: ${tonalities.find(t => t.key === localConfig.tonality)?.label || 'Professionell'}` : tonalities.find(t => t.key === localConfig.tonality)?.label || 'Professionell'}</div></div>
                   <div className={`post-type-toggle ${styleOverrides.tonality === 'manual' ? 'active' : ''}`}><div className="post-type-toggle-dot" /></div>
                 </div>
                 {styleOverrides.tonality === 'manual' && (
@@ -288,7 +414,7 @@ export default function Settings({ config, onSave, showToast }: Props) {
               {/* Zielgruppe */}
               <div className="style-option-item">
                 <div className="style-option-header" onClick={() => toggleStyleOverride('targetAudience')}>
-                  <div><div className="style-option-name">Zielgruppe</div><div className="style-option-desc">{styleOverrides.targetAudience === 'auto' ? 'KI wählt passend zum Produkt' : localConfig.targetAudience === 'b2b' ? 'B2B – Geschäftskunden' : localConfig.targetAudience === 'b2c' ? 'B2C – Endverbraucher' : 'Gemischt'}</div></div>
+                  <div><div className="style-option-name">Zielgruppe</div><div className="style-option-desc">{styleOverrides.targetAudience === 'auto' ? `KI wählt automatisch: ${localConfig.targetAudience === 'b2b' ? 'B2B' : localConfig.targetAudience === 'b2c' ? 'B2C' : 'Gemischt'}` : localConfig.targetAudience === 'b2b' ? 'B2B – Geschäftskunden' : localConfig.targetAudience === 'b2c' ? 'B2C – Endverbraucher' : 'Gemischt'}</div></div>
                   <div className={`post-type-toggle ${styleOverrides.targetAudience === 'manual' ? 'active' : ''}`}><div className="post-type-toggle-dot" /></div>
                 </div>
                 {styleOverrides.targetAudience === 'manual' && (
@@ -305,7 +431,7 @@ export default function Settings({ config, onSave, showToast }: Props) {
               {/* Altersgruppe */}
               <div className="style-option-item">
                 <div className="style-option-header" onClick={() => toggleStyleOverride('ageRange')}>
-                  <div><div className="style-option-name">Altersgruppe</div><div className="style-option-desc">{styleOverrides.ageRange === 'auto' ? 'KI schätzt passend zur Zielgruppe' : `${localConfig.ageRange.min} – ${localConfig.ageRange.max} Jahre`}</div></div>
+                  <div><div className="style-option-name">Altersgruppe</div><div className="style-option-desc">{styleOverrides.ageRange === 'auto' ? `KI wählt automatisch: ${localConfig.ageRange.min}–${localConfig.ageRange.max} Jahre` : `${localConfig.ageRange.min} – ${localConfig.ageRange.max} Jahre`}</div></div>
                   <div className={`post-type-toggle ${styleOverrides.ageRange === 'manual' ? 'active' : ''}`}><div className="post-type-toggle-dot" /></div>
                 </div>
                 {styleOverrides.ageRange === 'manual' && (
@@ -329,7 +455,7 @@ export default function Settings({ config, onSave, showToast }: Props) {
               {/* Sprache */}
               <div className="style-option-item">
                 <div className="style-option-header" onClick={() => toggleStyleOverride('language')}>
-                  <div><div className="style-option-name">Sprache</div><div className="style-option-desc">{styleOverrides.language === 'auto' ? 'Deutsch (Standard)' : localConfig.language === 'de' ? 'Deutsch' : 'Englisch'}</div></div>
+                  <div><div className="style-option-name">Sprache</div><div className="style-option-desc">{styleOverrides.language === 'auto' ? `KI wählt automatisch: ${localConfig.language === 'de' ? 'Deutsch' : 'Englisch'}` : localConfig.language === 'de' ? 'Deutsch' : 'Englisch'}</div></div>
                   <div className={`post-type-toggle ${styleOverrides.language === 'manual' ? 'active' : ''}`}><div className="post-type-toggle-dot" /></div>
                 </div>
                 {styleOverrides.language === 'manual' && (
@@ -345,7 +471,7 @@ export default function Settings({ config, onSave, showToast }: Props) {
               {/* Emoji-Nutzung */}
               <div className="style-option-item">
                 <div className="style-option-header" onClick={() => toggleStyleOverride('emojiUsage')}>
-                  <div><div className="style-option-name">Emoji-Nutzung</div><div className="style-option-desc">{styleOverrides.emojiUsage === 'auto' ? 'KI wählt passend zum Stil' : localConfig.emojiUsage === 'none' ? 'Keine' : localConfig.emojiUsage === 'minimal' ? 'Wenige' : localConfig.emojiUsage === 'moderate' ? 'Moderat' : 'Viele'}</div></div>
+                  <div><div className="style-option-name">Emoji-Nutzung</div><div className="style-option-desc">{styleOverrides.emojiUsage === 'auto' ? `KI wählt automatisch: ${localConfig.emojiUsage === 'none' ? 'Keine' : localConfig.emojiUsage === 'minimal' ? 'Wenige' : localConfig.emojiUsage === 'moderate' ? 'Moderat' : 'Viele'}` : localConfig.emojiUsage === 'none' ? 'Keine' : localConfig.emojiUsage === 'minimal' ? 'Wenige' : localConfig.emojiUsage === 'moderate' ? 'Moderat' : 'Viele'}</div></div>
                   <div className={`post-type-toggle ${styleOverrides.emojiUsage === 'manual' ? 'active' : ''}`}><div className="post-type-toggle-dot" /></div>
                 </div>
                 {styleOverrides.emojiUsage === 'manual' && (
@@ -363,7 +489,7 @@ export default function Settings({ config, onSave, showToast }: Props) {
               {/* Hashtags */}
               <div className="style-option-item">
                 <div className="style-option-header" onClick={() => toggleStyleOverride('hashtags')}>
-                  <div><div className="style-option-name">Hashtags</div><div className="style-option-desc">{styleOverrides.hashtags === 'auto' ? 'KI wählt 3–5 passende Hashtags' : localConfig.hashtags.join(', ') || 'Keine gesetzt'}</div></div>
+                  <div><div className="style-option-name">Hashtags</div><div className="style-option-desc">{styleOverrides.hashtags === 'auto' ? `KI wählt automatisch: 3–5 passende Hashtags${localConfig.hashtags.filter(Boolean).length > 0 ? ' + ' + localConfig.hashtags.filter(Boolean).join(', ') : ''}` : localConfig.hashtags.join(', ') || 'Keine gesetzt'}</div></div>
                   <div className={`post-type-toggle ${styleOverrides.hashtags === 'manual' ? 'active' : ''}`}><div className="post-type-toggle-dot" /></div>
                 </div>
                 {styleOverrides.hashtags === 'manual' && (
@@ -374,12 +500,7 @@ export default function Settings({ config, onSave, showToast }: Props) {
               </div>
             </div>
           </div>
-        </div>
-      )}
 
-      {/* ====== TAB 2: BILDGENERIERUNG ====== */}
-      {activeTab === 'image' && (
-        <div className="settings-tab-content">
           <div className="settings-section">
             <h2>Bildstil</h2>
             <div className="setting-group">
@@ -395,6 +516,41 @@ export default function Settings({ config, onSave, showToast }: Props) {
                   </button>
                 ))}
               </div>
+            </div>
+          </div>
+
+          <div className="settings-section">
+            <h2>Bildmodelle</h2>
+            <p className="section-subtitle">Die KI entscheidet pro Post, ob das Bild Menschen oder eine Szene zeigt, und wählt automatisch das passende Modell.</p>
+            <div className="setting-group">
+              <label>👥 Modell für Menschen</label>
+              <select
+                className="setting-select"
+                value={localConfig.imageModels.people}
+                onChange={e => set({ imageModels: { ...localConfig.imageModels, people: e.target.value } })}
+              >
+                {IMAGE_MODEL_OPTIONS.map(m => (
+                  <option key={m.slug} value={m.slug}>{m.label}</option>
+                ))}
+              </select>
+              <p className="setting-hint">
+                {IMAGE_MODEL_OPTIONS.find(m => m.slug === localConfig.imageModels.people)?.hint || ''}
+              </p>
+            </div>
+            <div className="setting-group">
+              <label>🏞️ Modell für Szenen / Produkte</label>
+              <select
+                className="setting-select"
+                value={localConfig.imageModels.scene}
+                onChange={e => set({ imageModels: { ...localConfig.imageModels, scene: e.target.value } })}
+              >
+                {IMAGE_MODEL_OPTIONS.map(m => (
+                  <option key={m.slug} value={m.slug}>{m.label}</option>
+                ))}
+              </select>
+              <p className="setting-hint">
+                {IMAGE_MODEL_OPTIONS.find(m => m.slug === localConfig.imageModels.scene)?.hint || ''}
+              </p>
             </div>
           </div>
 
@@ -438,6 +594,28 @@ export default function Settings({ config, onSave, showToast }: Props) {
       {activeTab === 'schedule' && (
         <div className="settings-tab-content">
           <div className="settings-section">
+            <h2>Plattformen</h2>
+            <p className="section-subtitle">Auf welchen Plattformen soll der Agent Posts veröffentlichen? Standard ist auf beiden.</p>
+            <div className="setting-group">
+              <div className="tone-buttons">
+                {([
+                  { key: 'both', label: '📱 Facebook & Instagram' },
+                  { key: 'facebook', label: '📘 Nur Facebook' },
+                  { key: 'instagram', label: '📸 Nur Instagram' },
+                ] as const).map(p => (
+                  <button
+                    key={p.key}
+                    className={`tone-button ${localConfig.publishPlatform === p.key ? 'active' : ''}`}
+                    onClick={() => set({ publishPlatform: p.key })}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="settings-section">
             <h2>Posting-Frequenz</h2>
             <div className="setting-group">
               <div className="view-toggle" style={{ marginBottom: 12 }}>
@@ -472,9 +650,7 @@ export default function Settings({ config, onSave, showToast }: Props) {
         </div>
       )}
 
-      <div className="settings-footer">
-        <button className="save-button-large" onClick={handleSave}>💾 Einstellungen speichern</button>
-      </div>
+      {toolbar}
     </div>
   );
 }

@@ -1,38 +1,67 @@
 -- ============================================
--- Produktbilder Feature - Supabase SQL Setup
+-- Onboarding-Wizard Feature
 -- ============================================
 
--- 1. Neue Tabelle: product_images
-CREATE TABLE IF NOT EXISTS product_images (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  product_id uuid NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-  user_id text NOT NULL DEFAULT 'admin',
-  original_url text NOT NULL,
-  processed_url text,
-  mode text NOT NULL DEFAULT 'original',
-  processing_status text NOT NULL DEFAULT 'pending',
-  created_at timestamptz DEFAULT now()
-);
-
--- 2. products: image_mode Spalte ergaenzen
-ALTER TABLE products
-  ADD COLUMN IF NOT EXISTS image_mode text DEFAULT 'ai_generated';
-
--- 3. config: image_fallback_mode ergaenzen
+-- config: setup_completed Flag fuer Onboarding-Wizard
 ALTER TABLE config
-  ADD COLUMN IF NOT EXISTS image_fallback_mode text DEFAULT 'ai_generated';
+  ADD COLUMN IF NOT EXISTS setup_completed boolean DEFAULT false;
 
--- 4. RLS Policies fuer product_images (analog zu products)
-ALTER TABLE product_images ENABLE ROW LEVEL SECURITY;
+-- Bestehende Zeile (admin) direkt auf true setzen, damit Wizard nicht sofort
+-- erscheint. Neustart jederzeit via Einstellungen -> "Setup neu starten".
+UPDATE config
+  SET setup_completed = true
+  WHERE user_id = 'admin' AND setup_completed IS NOT true;
 
-CREATE POLICY "Allow all for service role" ON product_images
-  FOR ALL
-  USING (true)
-  WITH CHECK (true);
+-- ============================================
+-- Publish-Plattform-Schalter
+-- ============================================
 
--- 5. Index fuer schnelle Abfragen
-CREATE INDEX IF NOT EXISTS idx_product_images_product_id
-  ON product_images(product_id);
+-- config: publish_platform steuert ob Posts auf FB, IG oder beide gehen
+ALTER TABLE config
+  ADD COLUMN IF NOT EXISTS publish_platform text DEFAULT 'both';
 
-CREATE INDEX IF NOT EXISTS idx_product_images_status
-  ON product_images(processing_status);
+-- ============================================
+-- Business-Typ & Branche
+-- ============================================
+
+-- config: business_type unterscheidet Produkt-, Dienstleistungs- oder Misch-Unternehmen
+-- und bestimmt UI-Labels + Bildprompt-Kontext (z.B. PPE für Handwerk)
+ALTER TABLE config
+  ADD COLUMN IF NOT EXISTS business_type text DEFAULT 'products';
+
+-- Freitext fuer die Branche, z.B. "Dachdeckerei & Fertighausbau", "Gastronomie"
+-- Wird in Bild-Prompts eingefuegt, damit Arbeitskleidung / Setting / Safety Gear passen
+ALTER TABLE config
+  ADD COLUMN IF NOT EXISTS industry text DEFAULT '';
+
+-- ============================================
+-- Produkt / Dienstleistung-Kennzeichnung (mixed-Business-Typ)
+-- ============================================
+-- products.entry_type: 'product' | 'service'
+-- NULL = automatisch aus business_type abgeleitet (services → service, sonst product)
+-- Bei business_type = 'mixed' waehlt der User explizit pro Eintrag.
+ALTER TABLE products
+  ADD COLUMN IF NOT EXISTS entry_type text;
+
+-- ============================================
+-- Zwei Bildmodelle (Menschen vs Szenen) - Auto-Wahl pro Post
+-- ============================================
+-- config.image_models: { "people": "<replicate-slug>", "scene": "<replicate-slug>" }
+-- Claude liefert scene_type ('people' | 'scene') pro Post; der Workflow waehlt
+-- automatisch das passende Modell. Standard: Imagen 4 fuer Menschen, Flux Ultra fuer Szenen.
+ALTER TABLE config
+  ADD COLUMN IF NOT EXISTS image_models jsonb
+  DEFAULT '{"people": "google/imagen-4", "scene": "black-forest-labs/flux-1.1-pro-ultra"}'::jsonb;
+
+-- Bestehende Zeilen mit Default befuellen
+UPDATE config
+  SET image_models = '{"people": "google/imagen-4", "scene": "black-forest-labs/flux-1.1-pro-ultra"}'::jsonb
+  WHERE image_models IS NULL;
+
+-- ============================================
+-- Anti-Wiederholungs-Kontext: image_concept persistieren
+-- ============================================
+-- posts.image_concept: Claudes Bildbeschreibung pro Post speichern,
+-- damit folgende Posts desselben Typs andere Bildszenen waehlen koennen.
+ALTER TABLE posts
+  ADD COLUMN IF NOT EXISTS image_concept text;
